@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: telecopy_postgres
+    environment:
+      POSTGRES_DB: telecopy_db
+      POSTGRES_USER: telecopy
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telecopy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: telecopy_backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://telecopy:password@postgres:5432/telecopy_db
+      API_ID: ${API_ID}
+      API_HASH: ${API_HASH}
+      DEBUG: "true"
+      ENVIRONMENT: development
+    volumes:
+      - ./backend:/app
+      - ./backend/sessions:/app/sessions
+      - ./backend/logs:/app/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+volumes:
+  postgres_data:
+    driver: local

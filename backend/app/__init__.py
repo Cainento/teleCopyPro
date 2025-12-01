@@ -1,0 +1,2 @@
+"""Telegram Copier Backend Application."""
+
