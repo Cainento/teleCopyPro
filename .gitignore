@@ -10,8 +10,9 @@ dist/
 build/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
+backend/lib/
 parts/
 sdist/
 var/
