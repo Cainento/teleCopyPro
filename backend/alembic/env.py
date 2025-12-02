@@ -84,7 +84,7 @@ async def run_async_migrations() -> None:
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        connect_args={"ssl": "disable"},  # Disable SSL for Fly.io internal network (asyncpg requires "disable")
+        connect_args={"ssl": False},  # Disable SSL for Fly.io internal network
     )
 
     async with connectable.connect() as connection:

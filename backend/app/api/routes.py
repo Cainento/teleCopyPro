@@ -142,6 +142,7 @@ async def sign_in(
     request: Request,
     telegram_service: TelegramService = Depends(get_telegram_service),
     session_service: SessionService = Depends(get_session_service),
+    user_service: UserService = Depends(get_user_service),
 ):
     """
     Verify phone code and complete authentication.
@@ -182,6 +183,10 @@ async def sign_in(
 
             # Remove temporary session (login successful)
             await session_service.remove_temp_session(phone_number)
+
+            # Get or create user in database
+            display_name = user_info.get("username") or user_info.get("first_name")
+            await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
             # Create JWT token
             access_token = create_access_token(
@@ -229,6 +234,7 @@ async def sign_in_2fa(
     request: Request,
     telegram_service: TelegramService = Depends(get_telegram_service),
     session_service: SessionService = Depends(get_session_service),
+    user_service: UserService = Depends(get_user_service),
 ):
     """
     Verify 2FA password.
@@ -263,6 +269,10 @@ async def sign_in_2fa(
 
         # Remove temporary session
         await session_service.remove_temp_session(phone_number)
+
+        # Get or create user in database
+        display_name = user_info.get("username") or user_info.get("first_name")
+        await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
         # Create JWT token
         access_token = create_access_token(
