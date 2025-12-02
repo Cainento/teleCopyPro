@@ -1,9 +1,9 @@
 // API Configuration
-// Empty string = use relative URLs (same domain via Vercel proxy)
-// Undefined = use localhost for local development
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : 'http://localhost:8000';
+// Production: Use relative URLs (same domain via Vercel proxy)
+// Development: Use localhost
+export const API_BASE_URL = import.meta.env.MODE === 'production'
+  ? '' // Empty string in production = use relative URLs
+  : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000');
 
 // Polling intervals (in milliseconds) - Optimized for performance
 export const POLLING_INTERVALS = {
