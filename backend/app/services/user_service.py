@@ -74,6 +74,10 @@ class UserService:
             usage_count=db_user.usage_count,
             plan_expiry=db_user.plan_expiry,
             activation_key=db_user.activation_key,
+            stripe_customer_id=db_user.stripe_customer_id,
+            stripe_subscription_id=db_user.stripe_subscription_id,
+            subscription_status=db_user.subscription_status,
+            subscription_period_end=db_user.subscription_period_end,
             created_at=db_user.created_at,
             updated_at=db_user.updated_at
         )
@@ -405,6 +409,18 @@ class UserService:
         """
         db_user = await self.user_repo.get_by_phone(phone_number)
         return self._db_to_pydantic(db_user) if db_user else None
+
+    async def get_db_user_by_phone(self, phone_number: str) -> Optional[DBUser]:
+        """
+        Get database user model by phone number (for internal use).
+
+        Args:
+            phone_number: User's phone number
+
+        Returns:
+            Database user model or None if not found
+        """
+        return await self.user_repo.get_by_phone(phone_number)
 
     async def get_or_create_user_by_phone(self, phone_number: str, display_name: Optional[str] = None) -> PydanticUser:
         """

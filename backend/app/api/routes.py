@@ -920,8 +920,8 @@ async def create_checkout_session(
         if not cancel_url:
             raise TeleCopyException("Cancel URL é obrigatório.", 400)
 
-        # Get user from database
-        user_db = await user_service.get_user_by_phone(current_user.phone_number)
+        # Get database user model (not Pydantic) for Stripe service
+        user_db = await user_service.get_db_user_by_phone(current_user.phone_number)
         if not user_db:
             raise NotFoundError("Usuário não encontrado.")
 
