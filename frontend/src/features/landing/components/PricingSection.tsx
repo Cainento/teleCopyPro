@@ -103,26 +103,34 @@ export function PricingSection() {
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
 
   const handleSelectPlan = async (plan: PlanOption) => {
+    console.log('handleSelectPlan called with plan:', plan.id);
+    console.log('isAuthenticated:', isAuthenticated);
+
     // If user is not authenticated, redirect to login
     if (!isAuthenticated) {
+      console.log('Not authenticated, redirecting to login');
       navigate(ROUTES.LOGIN);
       return;
     }
 
     // Free plan doesn't need checkout
     if (plan.id === 'FREE' || !plan.stripePriceIdMonthly) {
+      console.log('Free plan or no price ID, redirecting to dashboard');
       navigate(ROUTES.DASHBOARD);
       return;
     }
 
     const priceId = isAnnual ? plan.stripePriceIdAnnual : plan.stripePriceIdMonthly;
+    console.log('Selected price ID:', priceId, 'isAnnual:', isAnnual);
 
     if (!priceId) {
+      console.error('No price ID configured for plan:', plan.id);
       toast.error('Price ID não configurado para este plano');
       return;
     }
 
     setLoadingPlanId(plan.id);
+    console.log('Calling redirectToCheckout with price ID:', priceId);
 
     try {
       await redirectToCheckout(priceId);

@@ -30,7 +30,8 @@
       "Bash(npm run build)",
       "Bash(npx tsc:*)",
       "Bash(docker-compose ps:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(flyctl secrets:*)"
     ],
     "deny": [],
     "ask": []
