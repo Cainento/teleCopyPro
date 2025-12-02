@@ -80,11 +80,19 @@ async def run_async_migrations() -> None:
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = get_url()
 
+    # Determine connect_args based on database type
+    connect_args = {}
+    url = get_url()
+    if "postgresql" in url or "postgres" in url:
+        # PostgreSQL-specific: Disable SSL for Fly.io internal network or local development
+        connect_args = {"ssl": False}
+    # SQLite doesn't need any connect_args
+
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        connect_args={"ssl": False},  # Disable SSL for Fly.io internal network
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:

@@ -83,21 +83,31 @@ export function UpgradePlan({ currentPlan, className }: UpgradePlanProps) {
   const [loadingPlanId, setLoadingPlanId] = useState<string | null>(null);
 
   const handleUpgrade = async (plan: PlanOption) => {
-    if (plan.id === 'FREE' || !plan.stripePriceIdMonthly) return;
+    console.log('[UpgradePlan] handleUpgrade called with plan:', plan.id);
+    console.log('[UpgradePlan] Plan object:', plan);
+    console.log('[UpgradePlan] STRIPE_PRICE_IDS:', STRIPE_PRICE_IDS);
+
+    if (plan.id === 'FREE' || !plan.stripePriceIdMonthly) {
+      console.log('[UpgradePlan] Skipping - FREE plan or no price ID');
+      return;
+    }
 
     const priceId = isAnnual ? plan.stripePriceIdAnnual : plan.stripePriceIdMonthly;
+    console.log('[UpgradePlan] Selected price ID:', priceId, 'isAnnual:', isAnnual);
 
     if (!priceId) {
+      console.error('[UpgradePlan] No price ID configured');
       toast.error('Price ID não configurado para este plano');
       return;
     }
 
     setLoadingPlanId(plan.id);
+    console.log('[UpgradePlan] Calling redirectToCheckout');
 
     try {
       await redirectToCheckout(priceId);
     } catch (error) {
-      console.error('Erro ao redirecionar para checkout:', error);
+      console.error('[UpgradePlan] Erro ao redirecionar para checkout:', error);
       toast.error('Erro ao processar pagamento. Tente novamente.');
       setLoadingPlanId(null);
     }

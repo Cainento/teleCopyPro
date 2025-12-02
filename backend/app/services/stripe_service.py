@@ -49,16 +49,28 @@ class StripeService:
                 logger.info(f"User {user.id} already has Stripe customer: {user.stripe_customer_id}")
                 return user.stripe_customer_id
 
-            # Create new Stripe customer
-            customer = stripe.Customer.create(
-                email=user.email,
-                name=user.name,
-                phone=user.phone_number,
-                metadata={
+            # Prepare customer data, handling optional fields
+            customer_data = {
+                "metadata": {
                     "user_id": str(user.id),
                     "phone_number": user.phone_number or "",
                 }
-            )
+            }
+
+            # Only add email if it exists and is valid
+            if user.email:
+                customer_data["email"] = user.email
+
+            # Only add name if it exists
+            if user.name:
+                customer_data["name"] = user.name
+
+            # Only add phone if it exists
+            if user.phone_number:
+                customer_data["phone"] = user.phone_number
+
+            # Create new Stripe customer
+            customer = stripe.Customer.create(**customer_data)
 
             # Update user with Stripe customer ID
             user.stripe_customer_id = customer.id
@@ -68,10 +80,12 @@ class StripeService:
             return customer.id
 
         except stripe.error.StripeError as e:
-            logger.error(f"Stripe error creating customer for user {user.id}: {e}")
+            error_msg = f"Stripe error creating customer for user {user.id}: {type(e).__name__} - {str(e)}"
+            logger.error(error_msg, exc_info=True)
             raise TeleCopyException(f"Failed to create payment customer: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error creating Stripe customer for user {user.id}: {e}")
+            error_msg = f"Unexpected error creating Stripe customer for user {user.id}: {type(e).__name__} - {str(e)}"
+            logger.error(error_msg, exc_info=True)
             raise TeleCopyException(f"Failed to create payment customer: {str(e)}")
 
     async def create_checkout_session(
@@ -128,10 +142,12 @@ class StripeService:
             return checkout_session.url
 
         except stripe.error.StripeError as e:
-            logger.error(f"Stripe error creating checkout session for user {user.id}: {e}")
+            error_msg = f"Stripe error creating checkout session for user {user.id}, price_id={price_id}: {type(e).__name__} - {str(e)}"
+            logger.error(error_msg, exc_info=True)
             raise TeleCopyException(f"Failed to create checkout session: {str(e)}")
         except Exception as e:
-            logger.error(f"Unexpected error creating checkout session for user {user.id}: {e}")
+            error_msg = f"Unexpected error creating checkout session for user {user.id}, price_id={price_id}: {type(e).__name__} - {str(e)}"
+            logger.error(error_msg, exc_info=True)
             raise TeleCopyException(f"Failed to create checkout session: {str(e)}")
 
     async def get_subscription(self, subscription_id: str) -> Optional[stripe.Subscription]:

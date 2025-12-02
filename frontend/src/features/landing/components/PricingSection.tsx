@@ -104,6 +104,8 @@ export function PricingSection() {
 
   const handleSelectPlan = async (plan: PlanOption) => {
     console.log('handleSelectPlan called with plan:', plan.id);
+    console.log('Plan object:', plan);
+    console.log('STRIPE_PRICE_IDS:', STRIPE_PRICE_IDS);
     console.log('isAuthenticated:', isAuthenticated);
 
     // If user is not authenticated, redirect to login

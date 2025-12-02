@@ -46,9 +46,9 @@ class User(Base):
     # Email verification
     email_verified = Column(Boolean, default=False, nullable=False)
 
-    # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    # Timestamps (using Python datetime.now for database compatibility)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
     telegram_sessions = relationship("TelegramSession", back_populates="user", cascade="all, delete-orphan")
@@ -76,8 +76,8 @@ class ActivationKey(Base):
     used_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     used_at = Column(DateTime, nullable=True)
 
-    # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    # Timestamps (using Python datetime.now for database compatibility)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Optional: link to user who used the key
     used_by = relationship("User", foreign_keys=[used_by_user_id])
@@ -114,8 +114,8 @@ class CopyJob(Base):
     # Error tracking
     error_message = Column(Text, nullable=True)
 
-    # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    # Timestamps (using Python datetime.now for database compatibility)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     stopped_at = Column(DateTime, nullable=True)
@@ -146,9 +146,9 @@ class TelegramSession(Base):
     # Session status
     is_active = Column(Boolean, default=True, nullable=False, index=True)
 
-    # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    last_used_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    # Timestamps (using Python datetime.now for database compatibility)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_used_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="telegram_sessions")
@@ -181,9 +181,9 @@ class Invoice(Base):
     invoice_url = Column(String(500), nullable=True)  # Stripe hosted invoice URL
     invoice_pdf = Column(String(500), nullable=True)  # Stripe invoice PDF URL
 
-    # Timestamps
+    # Timestamps (using Python datetime.now for database compatibility)
     paid_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationships
     user = relationship("User", back_populates="invoices")

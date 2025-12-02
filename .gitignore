@@ -69,6 +69,11 @@ build/
 .env.*.local
 *.env
 
+# Environment templates (these should't be committed)
+.env.development
+.env.production
+.env.example
+
 # Telegram Sessions (IMPORTANT - contains auth tokens)
 *.session
 *.session-journal
@@ -201,5 +206,6 @@ temp/
 # Sentry
 .sentryclirc
 
-# Documentation
+# Documentation (ignore all markdown files)
 *.md
+

@@ -15,13 +15,21 @@ logger = get_logger(__name__)
 # NullPool is used in production for better connection management with asyncpg
 # When using NullPool, pool_size and max_overflow parameters should NOT be passed
 # SSL is disabled for Fly.io internal network (.flycast) - asyncpg requires False (boolean) or "disable"
+
+# Determine connect_args based on database type
+connect_args = {}
+if "postgresql" in settings.database_url or "postgres" in settings.database_url:
+    # PostgreSQL-specific: Disable SSL for Fly.io internal network or local development
+    connect_args = {"ssl": False}
+# SQLite doesn't need any connect_args
+
 if settings.is_production:
     engine = create_async_engine(
         settings.database_url,
         echo=settings.debug,  # Log SQL queries in debug mode
         pool_pre_ping=True,  # Verify connections before using them
         poolclass=NullPool,  # NullPool for production (no pool_size/max_overflow)
-        connect_args={"ssl": False},  # Disable SSL for Fly.io internal network
+        connect_args=connect_args,
     )
 else:
     # In development, use default pool with size limits
@@ -31,7 +39,7 @@ else:
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
         pool_pre_ping=True,  # Verify connections before using them
-        connect_args={"ssl": False},  # Disable SSL for local development
+        connect_args=connect_args,
     )
 
 # Create session factory
