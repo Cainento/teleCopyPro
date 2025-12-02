@@ -153,7 +153,7 @@ async def get_current_user(
         return user
 
     except Exception as e:
-        logger.error(f"Error authenticating user: {e}")
+        logger.error(f"Error authenticating user: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed",
