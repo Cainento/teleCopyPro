@@ -27,5 +27,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Start server (migrations will be run manually via SSH)
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
+# Start server with migrations
+CMD alembic upgrade head && \
+    uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
