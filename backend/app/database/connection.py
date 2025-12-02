@@ -14,12 +14,14 @@ logger = get_logger(__name__)
 # Create async engine
 # NullPool is used in production for better connection management with asyncpg
 # When using NullPool, pool_size and max_overflow are not applicable
+# SSL is disabled for Fly.io internal network (.flycast)
 if settings.is_production:
     engine = create_async_engine(
         settings.database_url,
         echo=settings.debug,  # Log SQL queries in debug mode
         pool_pre_ping=True,  # Verify connections before using them
         poolclass=NullPool,  # NullPool for production
+        connect_args={"ssl": False},  # Disable SSL for Fly.io internal network
     )
 else:
     engine = create_async_engine(
@@ -28,6 +30,7 @@ else:
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
         pool_pre_ping=True,  # Verify connections before using them
+        connect_args={"ssl": False},  # Disable SSL for local development
     )
 
 # Create session factory
