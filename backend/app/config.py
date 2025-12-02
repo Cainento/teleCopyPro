@@ -206,9 +206,17 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def convert_postgres_url(cls, v: str) -> str:
-        """Convert postgres:// to postgresql+asyncpg:// for SQLAlchemy."""
+        """
+        Convert postgres:// to postgresql+asyncpg:// for SQLAlchemy.
+        Also remove sslmode parameter as asyncpg doesn't accept it.
+        """
         if v and v.startswith("postgres://"):
-            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+
+        # Remove sslmode parameter if present (asyncpg doesn't support it)
+        if "?sslmode=" in v:
+            v = v.split("?sslmode=")[0]
+
         return v
 
     @property
