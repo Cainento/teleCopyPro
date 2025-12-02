@@ -99,7 +99,7 @@ class CopyService:
         api_hash: Optional[str] = None,
         job_id: Optional[str] = None,
         progress_callback: Optional[Callable[[int, int], None]] = None
-    ) -> CopyJob:
+    ) -> PydanticCopyJob:
         """
         Copy historical messages from source to target channel.
 
@@ -278,7 +278,7 @@ class CopyService:
         copy_media: bool = True,
         api_id: Optional[int] = None,
         api_hash: Optional[str] = None
-    ) -> CopyJob:
+    ) -> PydanticCopyJob:
         """
         Start real-time copying of messages from source to target channel.
 

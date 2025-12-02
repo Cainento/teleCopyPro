@@ -12,14 +12,23 @@ logger = get_logger(__name__)
 
 
 # Create async engine
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.debug,  # Log SQL queries in debug mode
-    pool_size=settings.database_pool_size,
-    max_overflow=settings.database_max_overflow,
-    pool_pre_ping=True,  # Verify connections before using them
-    poolclass=NullPool if settings.is_production else None,  # Use NullPool in production for better connection management
-)
+# NullPool is used in production for better connection management with asyncpg
+# When using NullPool, pool_size and max_overflow are not applicable
+if settings.is_production:
+    engine = create_async_engine(
+        settings.database_url,
+        echo=settings.debug,  # Log SQL queries in debug mode
+        pool_pre_ping=True,  # Verify connections before using them
+        poolclass=NullPool,  # NullPool for production
+    )
+else:
+    engine = create_async_engine(
+        settings.database_url,
+        echo=settings.debug,  # Log SQL queries in debug mode
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+        pool_pre_ping=True,  # Verify connections before using them
+    )
 
 # Create session factory
 AsyncSessionLocal = async_sessionmaker(

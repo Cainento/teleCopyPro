@@ -20,8 +20,12 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p sessions logs
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD python -c "import requests; requests.get('http://localhost:8000/api/telegram/health', timeout=5)"
+
 # Expose port
 EXPOSE 8000
 
-# Default command (overridden by docker-compose)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start server (migrations will be run manually via SSH)
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1

@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # CORS Configuration
     # Store as string to avoid JSON parsing issues, converted to list via properties
     cors_origins_str: str = Field(
-        default="http://localhost:8000,http://127.0.0.1:8000",
+        default="http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173,https://tele-copy-pro.vercel.app",
         alias="cors_origins",
         description="Allowed CORS origins (comma-separated or JSON array)"
     )

@@ -52,6 +52,25 @@ stripe_router = APIRouter(prefix="/api/stripe", tags=["stripe"])
 webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 
+@router.get("/health")
+async def health_check():
+    """
+    Health check endpoint for monitoring and load balancers.
+
+    Returns:
+        JSON with status, timestamp, and version
+    """
+    return JSONResponse(
+        content={
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": "2.0.0",
+            "environment": settings.environment
+        },
+        status_code=200
+    )
+
+
 @router.post("/send_code")
 @limiter.limit("5/minute")
 async def send_code(
