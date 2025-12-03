@@ -2,7 +2,6 @@
 
 from app.database.connection import AsyncSessionLocal, close_db, engine, get_db, init_db
 from app.database.models import (
-    ActivationKey,
     Base,
     CopyJob,
     Invoice,
@@ -20,7 +19,6 @@ __all__ = [
     # Models
     "Base",
     "User",
-    "ActivationKey",
     "CopyJob",
     "TelegramSession",
     "Invoice",

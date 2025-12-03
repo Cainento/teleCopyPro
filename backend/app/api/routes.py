@@ -26,8 +26,6 @@ from slowapi.util import get_remote_address
 limiter = Limiter(key_func=get_remote_address)
 from app.models.account import (
     AccountInfoResponse,
-    ActivationKeyRequest,
-    ActivationKeyResponse,
     PlanFeature,
     PlanInfo,
     PlansResponse,
@@ -49,6 +47,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 user_router = APIRouter(prefix="/api/user", tags=["user"])
 stripe_router = APIRouter(prefix="/api/stripe", tags=["stripe"])
+admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 
@@ -742,55 +741,6 @@ async def get_usage_stats(
         raise TeleCopyException(f"Erro interno ao obter estatísticas de uso: {str(e)}", 500)
 
 
-@user_router.post("/activate")
-async def activate_plan(
-    request: Request,
-    current_user: PydanticUser = Depends(get_current_user),
-    user_service: UserService = Depends(get_user_service),
-):
-    """
-    Activate a plan using an activation key for authenticated user.
-
-    Request body:
-        - activation_key: str
-
-    Returns:
-        JSON with activation confirmation
-    """
-    try:
-        data = await request.json()
-        # Use authenticated user's phone number
-        phone_number = current_user.phone_number
-        activation_key = data.get("activation_key")
-
-        if not activation_key:
-            raise TeleCopyException("Chave de ativação é obrigatória.", 400)
-
-        # Activate plan
-        user = await user_service.activate_plan_by_phone(phone_number, activation_key)
-
-        # user.plan is already a string due to use_enum_values=True in User model
-        plan_name = user.plan.upper() if isinstance(user.plan, str) else user.plan.value.upper()
-
-        response_data = ActivationKeyResponse(
-            message=f"Plano {plan_name} ativado com sucesso!",
-            plan=user.plan,
-            plan_expiry=user.plan_expiry
-        )
-        return JSONResponse(
-            content=response_data.model_dump(mode='json'),
-            status_code=200
-        )
-
-    except ValidationError as e:
-        raise TeleCopyException(str(e), 400)
-    except TeleCopyException as e:
-        raise
-    except Exception as e:
-        logger.error(f"Error in activate_plan: {e}", exc_info=True)
-        raise TeleCopyException(f"Erro interno ao ativar plano: {str(e)}", 500)
-
-
 @user_router.get("/plans")
 async def get_plans(
     user_service: UserService = Depends(get_user_service),
@@ -1134,4 +1084,107 @@ async def stripe_webhook(
             content={"status": "error", "message": str(e)},
             status_code=200
         )
+
+
+# Admin endpoints (for testing and development)
+@admin_router.post("/clear-stripe-data")
+async def clear_stripe_data(
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+):
+    """
+    Clear Stripe customer and subscription data for a user.
+    This is useful when switching between test and live Stripe environments.
+
+    Request body:
+        - phone_number: str
+
+    Returns:
+        JSON with success message
+    """
+    try:
+        data = await request.json()
+        phone_number = data.get("phone_number")
+
+        if not phone_number:
+            raise TeleCopyException("phone_number é obrigatório.", 400)
+
+        # Get user from database
+        db_user = await user_service.user_repo.get_by_phone(phone_number)
+        if not db_user:
+            raise NotFoundError(f"Usuário com telefone {phone_number} não encontrado")
+
+        # Clear Stripe data
+        db_user.stripe_customer_id = None
+        db_user.stripe_subscription_id = None
+        db_user.subscription_status = None
+        db_user.subscription_period_end = None
+
+        # Update user in database
+        await user_service.user_repo.update(db_user)
+
+        logger.info(f"Cleared Stripe data for user {phone_number}")
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": f"Stripe data cleared for user {phone_number}",
+                "phone_number": phone_number
+            },
+            status_code=200
+        )
+
+    except TeleCopyException as e:
+        raise
+    except Exception as e:
+        logger.error(f"Error in clear_stripe_data: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao limpar dados do Stripe: {str(e)}", 500)
+
+
+@admin_router.post("/process-subscription")
+async def process_subscription_manually(
+    request: Request,
+    stripe_service: StripeService = Depends(get_stripe_service),
+):
+    """
+    Manually process a subscription for a customer.
+    Useful when webhook wasn't configured and subscription needs to be applied.
+
+    Request body:
+        - subscription_id: str - Stripe subscription ID
+
+    Returns:
+        JSON with success message
+    """
+    try:
+        data = await request.json()
+        subscription_id = data.get("subscription_id")
+
+        if not subscription_id:
+            raise TeleCopyException("subscription_id é obrigatório.", 400)
+
+        # Get subscription from Stripe
+        subscription = await stripe_service.get_subscription(subscription_id)
+        if not subscription:
+            raise NotFoundError(f"Subscription {subscription_id} não encontrada")
+
+        # Handle subscription update
+        await stripe_service.handle_subscription_updated(subscription)
+
+        logger.info(f"Manually processed subscription {subscription_id}")
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": f"Subscription {subscription_id} processada com sucesso",
+                "subscription_id": subscription_id
+            },
+            status_code=200
+        )
+
+    except TeleCopyException as e:
+        raise
+    except Exception as e:
+        logger.error(f"Error in process_subscription_manually: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao processar assinatura: {str(e)}", 500)
 

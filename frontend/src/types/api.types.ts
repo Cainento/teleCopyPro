@@ -46,7 +46,6 @@ export interface User {
   plan: UserPlan;
   usage_count: number;
   plan_expiry?: string | null;
-  activation_key?: string | null;
   created_at: string;
   updated_at: string;
 }

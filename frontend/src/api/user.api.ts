@@ -54,17 +54,6 @@ export interface PlansResponse {
   plans: PlanInfo[];
 }
 
-export interface ActivationKeyRequest {
-  phone_number: string;
-  activation_key: string;
-}
-
-export interface ActivationKeyResponse {
-  message: string;
-  plan: 'free' | 'premium' | 'enterprise';
-  plan_expiry: string;
-}
-
 export const userApi = {
   /**
    * Get user usage statistics
@@ -91,14 +80,6 @@ export const userApi = {
    */
   async getPlans(): Promise<PlansResponse> {
     const response = await apiClient.get<PlansResponse>('/api/user/plans');
-    return response.data;
-  },
-
-  /**
-   * Activate a plan using activation key
-   */
-  async activatePlan(data: ActivationKeyRequest): Promise<ActivationKeyResponse> {
-    const response = await apiClient.post<ActivationKeyResponse>('/api/user/activate', data);
     return response.data;
   },
 

@@ -4,7 +4,6 @@ import { useAuthStore } from '@/store/auth.store';
 import { useAccount } from '../hooks/useAccount';
 import { PlanCard } from './PlanCard';
 import { UsageStats } from './UsageStats';
-import { ActivationKey } from './ActivationKey';
 import { UpgradePlan } from './UpgradePlan';
 import { toast } from 'sonner';
 import { ROUTES } from '@/lib/constants';
@@ -12,7 +11,7 @@ import { ROUTES } from '@/lib/constants';
 export function AccountSettings() {
   const navigate = useNavigate();
   const logout = useAuthStore((state) => state.logout);
-  const { accountData, limits, usage, activatePlan, isActivating, isLoading } = useAccount();
+  const { accountData, limits, usage, isLoading } = useAccount();
 
   const handleLogout = () => {
     toast.success('Você foi desconectado');
@@ -77,18 +76,12 @@ export function AccountSettings() {
         </div>
       </div>
 
-      {/* Two Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column - Plan Card */}
-        <PlanCard
-          currentPlan={accountData.plan}
-          limits={limits}
-          expiryDate={accountData.planExpiry}
-        />
-
-        {/* Right Column - Activation Key */}
-        <ActivationKey onActivate={activatePlan} isActivating={isActivating} />
-      </div>
+      {/* Plan Card */}
+      <PlanCard
+        currentPlan={accountData.plan}
+        limits={limits}
+        expiryDate={accountData.planExpiry}
+      />
 
       {/* Usage Stats */}
       <UsageStats

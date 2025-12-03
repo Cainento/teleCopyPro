@@ -75,12 +75,10 @@ class UserRepository:
         user: User,
         plan: UserPlan,
         plan_expiry: Optional[datetime] = None,
-        activation_key: Optional[str] = None,
     ) -> User:
         """Update user plan."""
         user.plan = plan
         user.plan_expiry = plan_expiry
-        user.activation_key = activation_key
         user.updated_at = datetime.utcnow()
         await self.db.flush()
         await self.db.refresh(user)

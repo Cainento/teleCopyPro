@@ -11,7 +11,6 @@ export interface AccountData {
   username?: string;
   plan: Plan;
   planExpiry?: string;
-  activationKey?: string;
 }
 
 export interface PlanLimits {
@@ -48,7 +47,6 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
 
 export function useAccount() {
   const session = useAuthStore((state) => state.session);
-  const [isActivating, setIsActivating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [accountInfo, setAccountInfo] = useState<AccountInfoResponse | null>(null);
   const [usageStats, setUsageStats] = useState<UsageStatsResponse | null>(null);
@@ -140,48 +138,10 @@ export function useAccount() {
     },
   };
 
-  // Activate premium plan with activation key
-  const activatePlan = async (activationKey: string): Promise<boolean> => {
-    setIsActivating(true);
-    try {
-      const phoneNumber = session?.phoneNumber;
-      if (!phoneNumber) {
-        toast.error('Sessão inválida. Faça login novamente.');
-        return false;
-      }
-
-      // Call the real API endpoint
-      const response = await userApi.activatePlan({
-        phone_number: phoneNumber,
-        activation_key: activationKey,
-      });
-
-      toast.success(response.message);
-
-      // Refetch account data to update the UI
-      const [accountData, usageData] = await Promise.all([
-        userApi.getAccountInfo(phoneNumber),
-        userApi.getUsageStats(phoneNumber),
-      ]);
-      setAccountInfo(accountData);
-      setUsageStats(usageData);
-
-      return true;
-    } catch (error: any) {
-      const errorMessage = getErrorMessage(error);
-      toast.error(errorMessage);
-      return false;
-    } finally {
-      setIsActivating(false);
-    }
-  };
-
   return {
     accountData,
     limits,
     usage,
-    activatePlan,
-    isActivating,
     isLoading,
   };
 }

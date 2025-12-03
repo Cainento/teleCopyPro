@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AuthenticationError, NotFoundError, ValidationError
 from app.core.logger import get_logger
 from app.database.repositories.user_repository import UserRepository
-from app.database.repositories.key_repository import KeyRepository
 from app.models.user import User as PydanticUser, UserCreate, UserPlan, UserUpdate
 from app.database.models import User as DBUser
 
@@ -28,7 +27,6 @@ class UserService:
         """
         self.db = db
         self.user_repo = UserRepository(db)
-        self.key_repo = KeyRepository(db)
 
     def _hash_password(self, password: str) -> str:
         """
@@ -73,7 +71,6 @@ class UserService:
             plan=db_user.plan,
             usage_count=db_user.usage_count,
             plan_expiry=db_user.plan_expiry,
-            activation_key=db_user.activation_key,
             stripe_customer_id=db_user.stripe_customer_id,
             stripe_subscription_id=db_user.stripe_subscription_id,
             subscription_status=db_user.subscription_status,
@@ -169,54 +166,6 @@ class UserService:
 
         updated_user = await self.user_repo.update(db_user)
         logger.info(f"Updated user: {email}")
-        return self._db_to_pydantic(updated_user)
-
-    async def activate_plan(self, email: str, activation_key: str) -> PydanticUser:
-        """
-        Activate a plan for a user using an activation key.
-
-        Args:
-            email: User email
-            activation_key: Activation key
-
-        Returns:
-            Updated user
-
-        Raises:
-            NotFoundError: If user is not found
-            ValidationError: If activation key is invalid
-        """
-        db_user = await self.user_repo.get_by_email(email.lower())
-        if not db_user:
-            raise NotFoundError(f"Usuário {email} não encontrado")
-
-        # Get key details first
-        key_obj = await self.key_repo.get_by_key(activation_key)
-        if not key_obj:
-            raise ValidationError("Chave de ativação inválida")
-
-        # Check if key is already used
-        if key_obj.is_used:
-            raise ValidationError("Esta chave de ativação já foi utilizada")
-
-        # At this point, key exists and is not used
-
-        # Update user plan
-        plan_type = key_obj.plan_type
-        days = key_obj.days_valid
-        plan_expiry = datetime.utcnow() + timedelta(days=days)
-
-        updated_user = await self.user_repo.update_plan(
-            db_user,
-            plan=plan_type,
-            plan_expiry=plan_expiry,
-            activation_key=activation_key
-        )
-
-        # Mark key as used
-        await self.key_repo.mark_as_used(key_obj, db_user.id)
-
-        logger.info(f"Activated {plan_type} plan for user {email}")
         return self._db_to_pydantic(updated_user)
 
     def can_use_feature(self, user: PydanticUser, feature: str) -> bool:
@@ -386,8 +335,7 @@ class UserService:
             updated_user = await self.user_repo.update_plan(
                 db_user,
                 plan=UserPlan.FREE,
-                plan_expiry=None,
-                activation_key=None
+                plan_expiry=None
             )
 
             logger.info(f"Downgraded expired plan for user {email}")
@@ -471,54 +419,6 @@ class UserService:
 
         updated_user = await self.user_repo.update(db_user)
         logger.info(f"Updated user: {phone_number}")
-        return self._db_to_pydantic(updated_user)
-
-    async def activate_plan_by_phone(self, phone_number: str, activation_key: str) -> PydanticUser:
-        """
-        Activate a plan for a user using an activation key (by phone number).
-
-        Args:
-            phone_number: User's phone number
-            activation_key: Activation key
-
-        Returns:
-            Updated user
-
-        Raises:
-            NotFoundError: If user is not found
-            ValidationError: If activation key is invalid
-        """
-        # Get or create user
-        pydantic_user = await self.get_or_create_user_by_phone(phone_number)
-        db_user = await self.user_repo.get_by_phone(phone_number)
-
-        # Get key details first
-        key_obj = await self.key_repo.get_by_key(activation_key)
-        if not key_obj:
-            raise ValidationError("Chave de ativação inválida")
-
-        # Check if key is already used
-        if key_obj.is_used:
-            raise ValidationError("Esta chave de ativação já foi utilizada")
-
-        # At this point, key exists and is not used
-
-        # Update user plan
-        plan_type = key_obj.plan_type
-        days = key_obj.days_valid
-        plan_expiry = datetime.utcnow() + timedelta(days=days)
-
-        updated_user = await self.user_repo.update_plan(
-            db_user,
-            plan=plan_type,
-            plan_expiry=plan_expiry,
-            activation_key=activation_key
-        )
-
-        # Mark key as used
-        await self.key_repo.mark_as_used(key_obj, db_user.id)
-
-        logger.info(f"Activated {plan_type} plan for user {phone_number}")
         return self._db_to_pydantic(updated_user)
 
     async def increment_usage_by_phone(self, phone_number: str) -> PydanticUser:

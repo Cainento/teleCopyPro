@@ -215,19 +215,64 @@ class StripeService:
             user.stripe_subscription_id = subscription.id
 
             # Calculate subscription period end
-            if subscription.current_period_end:
-                user.subscription_period_end = datetime.fromtimestamp(subscription.current_period_end)
+            # Handle both attribute access and dictionary access for Stripe objects
+            current_period_end = getattr(subscription, 'current_period_end', None)
+            if current_period_end is None and hasattr(subscription, 'get'):
+                current_period_end = subscription.get('current_period_end')
+            if current_period_end:
+                user.subscription_period_end = datetime.fromtimestamp(current_period_end)
 
             # Determine plan based on price ID
-            price_id = subscription["items"]["data"][0]["price"]["id"] if subscription.get("items") else None
+            # Access items data safely - Stripe subscription.items could be a method or attribute
+            items = None
+            if hasattr(subscription, 'items'):
+                items_attr = getattr(subscription, 'items')
+                # Check if it's a method and call it, or if it's already data
+                if callable(items_attr):
+                    # It's a method like dict.items(), don't call it
+                    # Instead try to access as dict
+                    if hasattr(subscription, 'get'):
+                        items = subscription.get('items')
+                elif items_attr is not None:
+                    items = items_attr
+            elif hasattr(subscription, 'get'):
+                items = subscription.get('items')
+
+            items_data = None
+            if items is not None:
+                items_data = getattr(items, 'data', None)
+                if items_data is None and hasattr(items, 'get'):
+                    items_data = items.get('data')
+
+            price_id = None
+            if items_data and len(items_data) > 0:
+                first_item = items_data[0]
+                price = getattr(first_item, 'price', None)
+                if price is None and hasattr(first_item, 'get'):
+                    price = first_item.get('price')
+
+                if price:
+                    price_id = getattr(price, 'id', None)
+                    if price_id is None and hasattr(price, 'get'):
+                        price_id = price.get('id')
+                    logger.info(f"Extracted price_id: {price_id} from subscription {subscription.id}")
+                else:
+                    logger.warning(f"Could not extract price from subscription {subscription.id}")
+            else:
+                logger.warning(f"No items_data found for subscription {subscription.id}. items={items}, items_data={items_data}")
 
             if price_id:
+                logger.info(f"Checking price_id {price_id} against premium={settings.stripe_premium_monthly_price_id}, {settings.stripe_premium_annual_price_id}")
                 if price_id in [settings.stripe_premium_monthly_price_id, settings.stripe_premium_annual_price_id]:
                     user.plan = UserPlan.PREMIUM
+                    logger.info(f"Setting user {user.id} plan to PREMIUM")
                 elif price_id in [settings.stripe_enterprise_monthly_price_id, settings.stripe_enterprise_annual_price_id]:
                     user.plan = UserPlan.ENTERPRISE
+                    logger.info(f"Setting user {user.id} plan to ENTERPRISE")
                 else:
                     logger.warning(f"Unknown price ID {price_id} for subscription {subscription.id}")
+            else:
+                logger.warning(f"No price_id found for subscription {subscription.id}")
 
             # If subscription is cancelled or past_due, handle accordingly
             if subscription.status in ["canceled", "incomplete_expired", "unpaid"]:
@@ -241,7 +286,7 @@ class StripeService:
             logger.info(f"Updated user {user.id} subscription from Stripe: plan={user.plan}, status={user.subscription_status}")
 
         except Exception as e:
-            logger.error(f"Error updating user {user.id} subscription from Stripe: {e}")
+            logger.error(f"Error updating user {user.id} subscription from Stripe: {e}", exc_info=True)
             raise TeleCopyException(f"Failed to update subscription: {str(e)}")
 
     async def handle_checkout_completed(self, session: stripe.checkout.Session) -> None:

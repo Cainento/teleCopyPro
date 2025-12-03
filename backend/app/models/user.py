@@ -38,7 +38,6 @@ class UserUpdate(BaseModel):
     plan: Optional[UserPlan] = None
     usage_count: Optional[int] = Field(None, ge=0)
     plan_expiry: Optional[datetime] = None
-    activation_key: Optional[str] = None
 
 
 class User(UserBase):
@@ -46,7 +45,6 @@ class User(UserBase):
 
     id: Optional[str] = Field(None, description="User ID")
     plan_expiry: Optional[datetime] = Field(None, description="Plan expiration date")
-    activation_key: Optional[str] = Field(None, description="Activation key used")
     stripe_customer_id: Optional[str] = Field(None, description="Stripe customer ID")
     stripe_subscription_id: Optional[str] = Field(None, description="Stripe subscription ID")
     subscription_status: Optional[str] = Field(None, description="Stripe subscription status")

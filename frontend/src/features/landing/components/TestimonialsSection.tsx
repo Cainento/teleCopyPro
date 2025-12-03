@@ -55,7 +55,7 @@ const fadeInUp = {
 
 export function TestimonialsSection() {
   return (
-    <section className="py-16 md:py-24 bg-muted/20">
+    <section id="testimonials" className="py-16 md:py-24 bg-muted/20">
       <div className="container mx-auto px-4 max-w-7xl">
         <motion.div
           initial={{ opacity: 0, y: 20 }}

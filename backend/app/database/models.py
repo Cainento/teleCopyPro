@@ -32,7 +32,6 @@ class User(Base):
     # Plan and subscription
     plan = Column(SQLEnum(UserPlan, values_callable=lambda x: [e.value for e in x]), default=UserPlan.FREE, nullable=False, index=True)
     plan_expiry = Column(DateTime, nullable=True)
-    activation_key = Column(String(100), nullable=True)
 
     # Stripe integration (will be populated in Phase 3)
     stripe_customer_id = Column(String(255), unique=True, nullable=True, index=True)
@@ -57,33 +56,6 @@ class User(Base):
 
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email}, plan={self.plan})>"
-
-
-class ActivationKey(Base):
-    """Activation key model for plan upgrades."""
-
-    __tablename__ = "activation_keys"
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-
-    # Key details
-    key = Column(String(100), unique=True, nullable=False, index=True)
-    plan_type = Column(SQLEnum(UserPlan, values_callable=lambda x: [e.value for e in x]), nullable=False)
-    days_valid = Column(Integer, default=30, nullable=False)  # How many days the plan is valid for
-
-    # Usage tracking
-    is_used = Column(Boolean, default=False, nullable=False, index=True)
-    used_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    used_at = Column(DateTime, nullable=True)
-
-    # Timestamps (using Python datetime.now for database compatibility)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    # Optional: link to user who used the key
-    used_by = relationship("User", foreign_keys=[used_by_user_id])
-
-    def __repr__(self):
-        return f"<ActivationKey(key={self.key}, plan={self.plan_type}, used={self.is_used})>"
 
 
 class CopyJob(Base):

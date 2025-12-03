@@ -56,29 +56,6 @@ class UsageStatsResponse(BaseModel):
         use_enum_values = True
 
 
-class ActivationKeyRequest(BaseModel):
-    """Activation key request model."""
-
-    phone_number: str = Field(..., description="User's phone number")
-    activation_key: str = Field(..., min_length=10, description="Activation key to redeem")
-
-
-class ActivationKeyResponse(BaseModel):
-    """Activation key response model."""
-
-    message: str = Field(..., description="Success message")
-    plan: UserPlan = Field(..., description="New plan type")
-    plan_expiry: datetime = Field(..., description="Plan expiration date")
-
-    class Config:
-        """Pydantic config."""
-
-        use_enum_values = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-
-
 class PlanFeature(BaseModel):
     """Plan feature model."""
 
