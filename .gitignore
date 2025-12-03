@@ -208,4 +208,4 @@ temp/
 
 # Documentation (ignore all markdown files)
 *.md
-
+frontend/.env.production
