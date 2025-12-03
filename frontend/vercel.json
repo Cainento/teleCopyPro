@@ -8,10 +8,15 @@
     {
       "source": "/api/:path*",
       "destination": "https://telegram-copier-backend.fly.dev/api/:path*"
+    }
+  ],
+  "routes": [
+    {
+      "handle": "filesystem"
     },
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
   ],
   "headers": [
