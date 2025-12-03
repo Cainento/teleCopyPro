@@ -1,9 +1,8 @@
 import { memo } from 'react';
-import { Clock, Zap, CheckCircle, XCircle, StopCircle, ArrowRight } from 'lucide-react';
+import { Clock, Zap, CheckCircle, XCircle, StopCircle, ArrowRight, Image, MessageSquare, AlertCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/cn';
-import { JobProgress } from './JobProgress';
 import type { Job } from '@/api/types';
 
 // Helper function to parse UTC timestamp correctly
@@ -98,13 +97,36 @@ export const JobCard = memo(function JobCard({
         </div>
       </div>
 
-      {/* Progress */}
-      <JobProgress
-        messagesCopied={job.messages_copied}
-        totalMessages={0}
-        status={job.status}
-        className="mb-3"
-      />
+      {/* Job Info */}
+      <div className="mb-3 space-y-2">
+        {/* Messages Copied */}
+        <div className="flex items-center gap-2 text-sm">
+          <MessageSquare className="h-4 w-4 text-muted-foreground" />
+          <span className="text-muted-foreground">Mensagens copiadas:</span>
+          <span className="font-semibold text-foreground">
+            {job.messages_copied.toLocaleString('pt-BR')}
+          </span>
+        </div>
+
+        {/* Messages Failed (only show if > 0) */}
+        {job.messages_failed > 0 && (
+          <div className="flex items-center gap-2 text-sm">
+            <AlertCircle className="h-4 w-4 text-destructive" />
+            <span className="text-muted-foreground">Mensagens falhadas:</span>
+            <span className="font-semibold text-destructive">
+              {job.messages_failed.toLocaleString('pt-BR')}
+            </span>
+          </div>
+        )}
+
+        {/* Copy Settings */}
+        {job.copy_media && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Image className="h-3.5 w-3.5" />
+            <span>Cópia de mídia ativada</span>
+          </div>
+        )}
+      </div>
 
       {/* Footer */}
       <div className="flex items-center justify-between text-xs text-muted-foreground">

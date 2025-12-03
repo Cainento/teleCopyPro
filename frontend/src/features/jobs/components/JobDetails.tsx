@@ -1,8 +1,7 @@
-import { ArrowLeft, Clock, Zap, Hash, Image, ArrowRight } from 'lucide-react';
+import { ArrowLeft, Clock, Zap, Hash, Image, ArrowRight, MessageSquare, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
-import { JobProgress } from './JobProgress';
 import { JobControls } from './JobControls';
 import type { Job } from '@/api/types';
 
@@ -96,11 +95,31 @@ export function JobDetails({
           </div>
         </div>
 
-        <JobProgress
-          messagesCopied={job.messages_copied}
-          totalMessages={0}
-          status={job.status}
-        />
+        <div className="space-y-3">
+          {/* Messages Copied */}
+          <div className="flex items-center gap-3">
+            <MessageSquare className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm text-muted-foreground">Mensagens copiadas</p>
+              <p className="text-xl font-bold text-foreground">
+                {job.messages_copied.toLocaleString('pt-BR')}
+              </p>
+            </div>
+          </div>
+
+          {/* Messages Failed (only show if > 0) */}
+          {job.messages_failed > 0 && (
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-destructive" />
+              <div>
+                <p className="text-sm text-muted-foreground">Mensagens falhadas</p>
+                <p className="text-xl font-bold text-destructive">
+                  {job.messages_failed.toLocaleString('pt-BR')}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
 
         {job.status === 'failed' && job.error_message && (
           <div className="mt-4 p-3 bg-destructive/5 border border-destructive/20 rounded text-sm text-destructive">
