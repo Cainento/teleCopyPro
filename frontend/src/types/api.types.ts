@@ -73,6 +73,8 @@ export interface CopyRequest {
   target_channel: string;
   real_time?: boolean;
   copy_media?: boolean;
+  api_id: number;
+  api_hash: string;
 }
 
 export interface StatusRequest {

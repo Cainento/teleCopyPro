@@ -38,6 +38,8 @@ export function useCopy() {
         target_channel: data.targetChannel,
         real_time: data.realTime,
         copy_media: data.copyMedia,
+        api_id: session.apiId,
+        api_hash: session.apiHash,
       });
     },
     onMutate: async () => {

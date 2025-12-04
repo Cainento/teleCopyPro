@@ -38,17 +38,33 @@ class TelegramService:
         self._session_path = Path(settings.session_folder)
         self._session_path.mkdir(parents=True, exist_ok=True)
 
-    def _get_session_name(self, phone_number: str) -> str:
+    def _get_session_name(self, phone_number: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> str:
         """
-        Generate session name from phone number.
+        Generate session name from phone number and optionally API credentials.
+
+        If API credentials are provided, creates a unique session name that includes
+        a hash of the credentials. This allows multiple sessions per phone number
+        when using different Telegram apps (different API credentials).
 
         Args:
             phone_number: Phone number
+            api_id: Optional API ID to include in session name
+            api_hash: Optional API Hash to include in session name
 
         Returns:
-            Sanitized session name
+            Sanitized session name, optionally with API credentials hash
         """
-        return phone_number.replace("+", "").replace(" ", "").replace("-", "")
+        base_name = phone_number.replace("+", "").replace(" ", "").replace("-", "")
+
+        # If API credentials provided, include their hash in the session name
+        if api_id is not None and api_hash is not None:
+            import hashlib
+            # Create a short hash of api_id + api_hash
+            cred_string = f"{api_id}:{api_hash}"
+            cred_hash = hashlib.md5(cred_string.encode()).hexdigest()[:8]
+            return f"{base_name}_{cred_hash}"
+
+        return base_name
 
     def _get_session_path(self, session_name: str) -> Path:
         """
@@ -85,16 +101,20 @@ class TelegramService:
         """
         if use_string_session:
             session = StringSession()
+            logger.info(f"[CREATE_CLIENT] Using StringSession")
         else:
             if not session_name and phone_number:
-                session_name = self._get_session_name(phone_number)
+                session_name = self._get_session_name(phone_number, api_id, api_hash)
             elif not session_name:
                 raise ValueError("Either phone_number or session_name must be provided")
 
             session_path = self._get_session_path(session_name)
-            session = str(session_path)
+            # TelegramClient adds .session extension automatically, so remove it
+            session = str(session_path).replace('.session', '')
+            logger.info(f"[CREATE_CLIENT] Session path: {session_path}, Cleaned session: {session}")
 
         client = TelegramClient(session, api_id, api_hash)
+        logger.info(f"[CREATE_CLIENT] Created client with session: {session}")
         return client
 
     async def get_or_create_client(
@@ -114,17 +134,22 @@ class TelegramService:
         Returns:
             TelegramClient instance
         """
-        session_name = self._get_session_name(phone_number)
+        session_name = self._get_session_name(phone_number, api_id, api_hash)
+        logger.info(f"[GET_OR_CREATE_CLIENT] Session name: {session_name}")
 
         # Check if client is already active
         if session_name in self._active_clients:
             client = self._active_clients[session_name]
+            logger.info(f"[GET_OR_CREATE_CLIENT] Found active client, connected: {client.is_connected()}")
             if client.is_connected():
                 return client
+            logger.info(f"[GET_OR_CREATE_CLIENT] Active client not connected, creating new one")
 
         # Create new client
+        logger.info(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number}")
         client = await self.create_client(api_id, api_hash, phone_number=phone_number)
         await client.connect()
+        logger.info(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
 
         # Store active client
         self._active_clients[session_name] = client
@@ -217,7 +242,7 @@ class TelegramService:
             user = await client.sign_in(phone_number, phone_code, phone_code_hash=phone_code_hash)
 
             # Save session to file
-            session_name = self._get_session_name(phone_number)
+            session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
             session_path = self._get_session_path(session_name)
 
             # If using StringSession, we need to migrate to file session
@@ -225,7 +250,9 @@ class TelegramService:
                 # Get session string
                 session_string = client.session.save()
                 # Create file session client with the session string
-                file_client = TelegramClient(str(session_path), client.api_id, client.api_hash)
+                # Note: TelegramClient adds .session extension automatically, so we remove it from the path
+                session_path_without_ext = str(session_path).replace('.session', '')
+                file_client = TelegramClient(session_path_without_ext, client.api_id, client.api_hash)
                 await file_client.connect()
                 # The file session is automatically saved by Telethon
                 await client.disconnect()
@@ -286,7 +313,7 @@ class TelegramService:
             # Now the client is fully authenticated
             # We need to save this to a persistent file-based session
             if phone_number:
-                session_name = self._get_session_name(phone_number)
+                session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
                 session_path = self._get_session_path(session_name)
 
                 # Store API credentials for this session
@@ -313,17 +340,19 @@ class TelegramService:
             logger.error(f"Error verifying 2FA password: {e}", exc_info=True)
             raise AuthenticationError("Senha de duas etapas inválida.") from e
 
-    def get_session_credentials(self, phone_number: str) -> Optional[dict]:
+    def get_session_credentials(self, phone_number: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> Optional[dict]:
         """
         Get stored API credentials for a phone number.
-        
+
         Args:
             phone_number: Phone number
-            
+            api_id: Optional API ID for session lookup
+            api_hash: Optional API Hash for session lookup
+
         Returns:
             Dict with api_id and api_hash, or None if not found
         """
-        session_name = self._get_session_name(phone_number)
+        session_name = self._get_session_name(phone_number, api_id, api_hash)
         return self._session_credentials.get(session_name)
     
     async def check_session_status(
@@ -343,23 +372,31 @@ class TelegramService:
         Returns:
             TelegramSession with status information
         """
-        session_name = self._get_session_name(phone_number)
-        session_path = self._get_session_path(session_name)
-        
+        # First, ensure we have API credentials before generating session name
         # Try to get credentials from stored session if not provided
         if api_id is None or api_hash is None:
-            stored_creds = self.get_session_credentials(phone_number)
+            stored_creds = self.get_session_credentials(phone_number, api_id, api_hash)
+            logger.info(f"[CHECK_SESSION] Stored credentials: {stored_creds is not None}")
             if stored_creds:
                 api_id = api_id or stored_creds.get("api_id")
                 api_hash = api_hash or stored_creds.get("api_hash")
-        
+
         # Fallback to settings if still not available
         if api_id is None or api_hash is None:
             from app.config import settings
+            logger.info(f"[CHECK_SESSION] Falling back to settings API credentials")
             api_id = api_id or settings.api_id
             api_hash = api_hash or settings.api_hash
 
+        # Now generate session name with the resolved API credentials
+        session_name = self._get_session_name(phone_number, api_id, api_hash)
+        session_path = self._get_session_path(session_name)
+
+        logger.info(f"[CHECK_SESSION] Phone: {phone_number}, API ID: {api_id}, Session name: {session_name}, Session path: {session_path}")
+
+        logger.info(f"[CHECK_SESSION] Session path exists: {session_path.exists()}")
         if not session_path.exists():
+            logger.warning(f"[CHECK_SESSION] Session file not found at {session_path}")
             return TelegramSession(
                 session_name=session_name,
                 phone_number=phone_number,
@@ -370,8 +407,11 @@ class TelegramService:
             )
 
         try:
+            logger.info(f"[CHECK_SESSION] Getting or creating client for {phone_number}")
             client = await self.get_or_create_client(phone_number, api_id, api_hash)
+            logger.info(f"[CHECK_SESSION] Client connected: {client.is_connected()}")
             is_authorized = await client.is_user_authorized()
+            logger.info(f"[CHECK_SESSION] Is authorized: {is_authorized}")
 
             if is_authorized:
                 me = await client.get_me()
@@ -405,20 +445,34 @@ class TelegramService:
                 is_authorized=False
             )
 
-    async def disconnect_client(self, phone_number: str) -> None:
+    async def disconnect_client(self, phone_number: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> None:
         """
         Disconnect and remove a client.
 
         Args:
             phone_number: Phone number
+            api_id: Optional API ID - if not provided, disconnects all sessions for this phone
+            api_hash: Optional API Hash - if not provided, disconnects all sessions for this phone
         """
-        session_name = self._get_session_name(phone_number)
-        if session_name in self._active_clients:
-            client = self._active_clients[session_name]
-            if client.is_connected():
-                await client.disconnect()
-            del self._active_clients[session_name]
-            logger.info(f"Disconnected client for {phone_number}")
+        if api_id and api_hash:
+            # Disconnect specific session
+            session_name = self._get_session_name(phone_number, api_id, api_hash)
+            if session_name in self._active_clients:
+                client = self._active_clients[session_name]
+                if client.is_connected():
+                    await client.disconnect()
+                del self._active_clients[session_name]
+                logger.info(f"Disconnected client for {phone_number} with API ID {api_id}")
+        else:
+            # Disconnect all sessions for this phone number
+            base_name = phone_number.replace("+", "").replace(" ", "").replace("-", "")
+            sessions_to_remove = [name for name in self._active_clients.keys() if name.startswith(base_name)]
+            for session_name in sessions_to_remove:
+                client = self._active_clients[session_name]
+                if client.is_connected():
+                    await client.disconnect()
+                del self._active_clients[session_name]
+                logger.info(f"Disconnected client session {session_name}")
 
     async def cleanup(self) -> None:
         """Disconnect all active clients."""
