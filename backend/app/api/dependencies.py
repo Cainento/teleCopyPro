@@ -112,6 +112,7 @@ async def get_current_user(
         HTTPException: If token is invalid, expired, or user not found
     """
     if not credentials:
+        logger.warning("Authentication failed: Missing credentials")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",
@@ -119,11 +120,13 @@ async def get_current_user(
         )
 
     token = credentials.credentials
+    logger.debug(f"Verifying JWT token (first 20 chars): {token[:20]}...")
 
     # Verify JWT token
     payload = verify_token(token, settings.jwt_secret_key)
 
     if not payload:
+        logger.warning(f"Authentication failed: Invalid or expired token")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -133,21 +136,29 @@ async def get_current_user(
     # Extract phone number from token
     phone_number = payload.get("sub")
     if not phone_number:
+        logger.warning(f"Authentication failed: No phone number in token payload")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    logger.debug(f"Token verified for phone: {phone_number}")
+
     # Get user from database
     try:
         user = await user_service.get_user_by_phone(phone_number)
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            logger.warning(f"Authentication failed: User not found in database for phone: {phone_number}")
+            # Auto-create user if not exists (user might have logged in but database was reset)
+            logger.info(f"Auto-creating user for phone: {phone_number}")
+            user = await user_service.get_or_create_user_by_phone(phone_number)
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="User not found and could not be created",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
 
         logger.info(f"Authenticated user: {phone_number}")
         return user
