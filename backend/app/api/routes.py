@@ -187,11 +187,8 @@ async def sign_in(
             display_name = user_info.get("username") or user_info.get("first_name")
             user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
-            # Track session activity in database
-            telegram_service.set_db(user_service.db)
-            await telegram_service._update_session_activity(
-                phone_number, api_id, api_hash, user.id
-            )
+            # Note: Session activity will be tracked on the next authenticated request
+            # to avoid database transaction conflicts during login
 
             # Create JWT token
             access_token = create_access_token(
@@ -281,11 +278,8 @@ async def sign_in_2fa(
         display_name = user_info.get("username") or user_info.get("first_name")
         user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
-        # Track session activity in database
-        telegram_service.set_db(user_service.db)
-        await telegram_service._update_session_activity(
-            phone_number, api_id, api_hash, user.id
-        )
+        # Note: Session activity will be tracked on the next authenticated request
+        # to avoid database transaction conflicts during login
 
         # Create JWT token
         access_token = create_access_token(
