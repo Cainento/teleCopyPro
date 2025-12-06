@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.database.models import CopyJob
 
@@ -40,13 +41,18 @@ class JobRepository:
 
     async def get_by_id(self, job_id: str) -> Optional[CopyJob]:
         """Get job by job ID."""
-        result = await self.db.execute(select(CopyJob).where(CopyJob.job_id == job_id))
+        result = await self.db.execute(
+            select(CopyJob)
+            .options(joinedload(CopyJob.user))
+            .where(CopyJob.job_id == job_id)
+        )
         return result.scalar_one_or_none()
 
     async def get_by_user(self, user_id: int, skip: int = 0, limit: int = 100) -> List[CopyJob]:
         """Get all jobs for a user."""
         result = await self.db.execute(
             select(CopyJob)
+            .options(joinedload(CopyJob.user))
             .where(CopyJob.user_id == user_id)
             .order_by(CopyJob.created_at.desc())
             .offset(skip)
@@ -57,7 +63,9 @@ class JobRepository:
     async def get_active_jobs_by_user(self, user_id: int) -> List[CopyJob]:
         """Get active jobs (running or pending) for a user."""
         result = await self.db.execute(
-            select(CopyJob).where(
+            select(CopyJob)
+            .options(joinedload(CopyJob.user))
+            .where(
                 CopyJob.user_id == user_id,
                 CopyJob.status.in_(["pending", "running"]),
             )
@@ -67,7 +75,9 @@ class JobRepository:
     async def get_real_time_jobs_by_user(self, user_id: int) -> List[CopyJob]:
         """Get active real-time jobs for a user."""
         result = await self.db.execute(
-            select(CopyJob).where(
+            select(CopyJob)
+            .options(joinedload(CopyJob.user))
+            .where(
                 CopyJob.user_id == user_id,
                 CopyJob.mode == "real_time",
                 CopyJob.status == "running",

@@ -38,7 +38,7 @@ class CopyService:
         """Convert database job to Pydantic model."""
         return PydanticCopyJob(
             id=db_job.job_id,
-            phone_number="",  # Will be retrieved from user
+            phone_number=db_job.user.phone_number if db_job.user else "",
             source_channel=db_job.source_channel,
             target_channel=db_job.destination_channel,
             copy_media=True,  # Default
