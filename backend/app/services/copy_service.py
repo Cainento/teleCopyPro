@@ -239,7 +239,7 @@ class CopyService:
             async for message in client.iter_messages(source_entity, reverse=True):
                 try:
                     if copy_media or not message.media:
-                        await client.forward_messages(target_entity, message)
+                        await client.send_message(target_entity, message)
                         count += 1
 
                         # Update progress every 10 messages
@@ -391,7 +391,7 @@ class CopyService:
                 async with AsyncSessionLocal() as handler_db:
                     try:
                         if copy_media or not event.message.media:
-                            await client.forward_messages(target_entity, event.message)
+                            await client.send_message(target_entity, event.message)
                             # Update database (use fresh query to avoid stale data)
                             handler_repo = JobRepository(handler_db)
                             fresh_job = await handler_repo.get_by_id(job_id)
