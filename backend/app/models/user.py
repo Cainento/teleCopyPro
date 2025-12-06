@@ -43,7 +43,7 @@ class UserUpdate(BaseModel):
 class User(UserBase):
     """Complete user model."""
 
-    id: Optional[str] = Field(None, description="User ID")
+    id: Optional[int] = Field(None, description="User ID")
     plan_expiry: Optional[datetime] = Field(None, description="Plan expiration date")
     stripe_customer_id: Optional[str] = Field(None, description="Stripe customer ID")
     stripe_subscription_id: Optional[str] = Field(None, description="Stripe subscription ID")
@@ -64,7 +64,7 @@ class User(UserBase):
 class UserResponse(UserBase):
     """User response model (without sensitive data)."""
 
-    id: Optional[str] = None
+    id: Optional[int] = None
     plan_expiry: Optional[datetime] = None
     created_at: Optional[datetime] = None
 

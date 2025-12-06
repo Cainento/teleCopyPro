@@ -185,7 +185,13 @@ async def sign_in(
 
             # Get or create user in database
             display_name = user_info.get("username") or user_info.get("first_name")
-            await user_service.get_or_create_user_by_phone(phone_number, display_name)
+            user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
+
+            # Track session activity in database
+            telegram_service.set_db(user_service.db)
+            await telegram_service._update_session_activity(
+                phone_number, api_id, api_hash, user.id
+            )
 
             # Create JWT token
             access_token = create_access_token(
@@ -262,6 +268,8 @@ async def sign_in_2fa(
             )
 
         client = temp_session["client"]
+        api_id = temp_session["api_id"]
+        api_hash = temp_session["api_hash"]
 
         # Verify 2FA password
         user_info = await telegram_service.verify_2fa_password(client, password, phone_number)
@@ -271,7 +279,13 @@ async def sign_in_2fa(
 
         # Get or create user in database
         display_name = user_info.get("username") or user_info.get("first_name")
-        await user_service.get_or_create_user_by_phone(phone_number, display_name)
+        user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
+
+        # Track session activity in database
+        telegram_service.set_db(user_service.db)
+        await telegram_service._update_session_activity(
+            phone_number, api_id, api_hash, user.id
+        )
 
         # Create JWT token
         access_token = create_access_token(
@@ -332,6 +346,43 @@ async def get_status(
     except Exception as e:
         logger.error(f"Error in get_status: {e}", exc_info=True)
         raise TeleCopyException(f"Erro interno ao verificar status: {str(e)}", 500)
+
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    telegram_service: TelegramService = Depends(get_telegram_service),
+):
+    """
+    Logout user by disconnecting Telegram session and deleting session file.
+
+    Query parameters (optional):
+        - api_id: int
+        - api_hash: str
+
+    Returns:
+        JSON with success message
+    """
+    try:
+        data = await request.json() if request.headers.get("content-length") else {}
+        phone_number = current_user.phone_number
+        api_id = data.get("api_id")
+        api_hash = data.get("api_hash")
+
+        # Logout (disconnect and delete session)
+        await telegram_service.logout(phone_number, api_id, api_hash)
+
+        return JSONResponse(
+            content={
+                "message": "Logout realizado com sucesso. Sessão do Telegram desconectada."
+            },
+            status_code=200
+        )
+
+    except Exception as e:
+        logger.error(f"Error in logout: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro interno ao fazer logout: {str(e)}", 500)
 
 
 @router.post("/copy")

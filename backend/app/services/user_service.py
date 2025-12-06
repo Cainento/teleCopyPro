@@ -64,7 +64,7 @@ class UserService:
             Pydantic user instance
         """
         return PydanticUser(
-            id=str(db_user.id),
+            id=db_user.id,
             phone_number=db_user.phone_number,
             email=db_user.email,
             name=db_user.name,

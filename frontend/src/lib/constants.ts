@@ -5,6 +5,11 @@ export const API_BASE_URL = import.meta.env.MODE === 'production'
   ? '' // Empty string in production = use relative URLs
   : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000');
 
+// Direct backend URL (bypasses Vercel proxy for specific endpoints like logout)
+export const BACKEND_URL = import.meta.env.MODE === 'production'
+  ? 'https://telegram-copier-backend.fly.dev'
+  : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000');
+
 // Polling intervals (in milliseconds) - Optimized for performance
 export const POLLING_INTERVALS = {
   JOB_PROGRESS: 5000, // 5 seconds for active job progress (reduced from 2s)

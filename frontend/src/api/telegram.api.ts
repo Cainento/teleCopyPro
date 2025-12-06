@@ -1,4 +1,6 @@
+import axios from 'axios';
 import apiClient from './client';
+import { BACKEND_URL, STORAGE_KEYS } from '@/lib/constants';
 import type {
   SendCodeRequest,
   SendCodeResponse,
@@ -41,6 +43,40 @@ export const telegramApi = {
     const response = await apiClient.get<StatusResponse>('/api/telegram/status', {
       params: params || {},
     });
+    return response.data;
+  },
+
+  /**
+   * Logout from Telegram (disconnect session and delete session file)
+   * NOTE: Calls backend directly to bypass Vercel proxy which was canceling POST requests
+   */
+  logout: async (data?: { api_id?: number; api_hash?: string }): Promise<{ message: string }> => {
+    // Get auth token from localStorage to include in request
+    const authData = localStorage.getItem(STORAGE_KEYS.AUTH);
+    let token = '';
+
+    if (authData) {
+      try {
+        const parsedData = JSON.parse(authData);
+        token = parsedData?.state?.session?.accessToken || '';
+      } catch (error) {
+        console.error('Error parsing auth data:', error);
+      }
+    }
+
+    // Call backend directly to bypass Vercel proxy
+    const response = await axios.post<{ message: string }>(
+      `${BACKEND_URL}/api/telegram/logout`,
+      data || {},
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        timeout: 30000,
+      }
+    );
+
     return response.data;
   },
 };

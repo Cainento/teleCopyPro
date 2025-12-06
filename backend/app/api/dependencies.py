@@ -96,7 +96,8 @@ def get_stripe_service(db: AsyncSession = Depends(get_db)) -> StripeService:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    user_service: UserService = Depends(get_user_service)
+    user_service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db)
 ) -> PydanticUser:
     """
     Get the current authenticated user from JWT token.
@@ -104,6 +105,7 @@ async def get_current_user(
     Args:
         credentials: HTTP Bearer credentials containing JWT token
         user_service: UserService instance for database operations
+        db: Database session for session tracking
 
     Returns:
         Authenticated user
@@ -159,6 +161,18 @@ async def get_current_user(
                     detail="User not found and could not be created",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+
+        # Update session activity timestamp in background (don't block request)
+        try:
+            from app.database.repositories.session_repository import SessionRepository
+            session_repo = SessionRepository(db)
+            db_session = await session_repo.get_by_phone(phone_number)
+            if db_session:
+                await session_repo.update_last_used(db_session)
+                logger.debug(f"Updated session activity for {phone_number}")
+        except Exception as e:
+            logger.error(f"Error updating session activity: {e}", exc_info=True)
+            # Don't fail authentication if activity update fails
 
         logger.info(f"Authenticated user: {phone_number}")
         return user

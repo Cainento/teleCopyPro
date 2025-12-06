@@ -1,9 +1,11 @@
 """Telegram service for managing Telegram clients and authentication."""
 
 import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from telethon import TelegramClient
 from telethon.errors import (
     ApiIdInvalidError,
@@ -23,20 +25,107 @@ from app.core.exceptions import (
     TelegramAPIError,
 )
 from app.core.logger import get_logger
+from app.database.repositories.session_repository import SessionRepository
 from app.models.session import SessionStatus, TelegramSession
 
 logger = get_logger(__name__)
+
+# Session expiration: 7 days
+SESSION_EXPIRATION_DAYS = 7
 
 
 class TelegramService:
     """Service for managing Telegram client connections and authentication."""
 
-    def __init__(self):
-        """Initialize Telegram service."""
+    def __init__(self, db: Optional[AsyncSession] = None):
+        """Initialize Telegram service.
+
+        Args:
+            db: Optional database session for session tracking
+        """
         self._active_clients: dict[str, TelegramClient] = {}
         self._session_credentials: dict[str, dict[str, any]] = {}  # phone_number -> {api_id, api_hash}
         self._session_path = Path(settings.session_folder)
         self._session_path.mkdir(parents=True, exist_ok=True)
+        self._db = db
+
+    def set_db(self, db: AsyncSession):
+        """Set database session for session tracking."""
+        self._db = db
+
+    def _get_session_repo(self) -> Optional[SessionRepository]:
+        """Get SessionRepository if database is available."""
+        if self._db:
+            return SessionRepository(self._db)
+        return None
+
+    async def _is_session_expired(self, phone_number: str) -> bool:
+        """
+        Check if session is expired (>7 days of inactivity).
+
+        Args:
+            phone_number: Phone number to check
+
+        Returns:
+            True if session is expired or doesn't exist, False otherwise
+        """
+        session_repo = self._get_session_repo()
+        if not session_repo:
+            # If no database available, cannot check expiration
+            return False
+
+        try:
+            db_session = await session_repo.get_by_phone(phone_number)
+            if not db_session:
+                return True  # No session in database
+
+            # Check if session is older than 7 days
+            expiration_time = db_session.last_used_at + timedelta(days=SESSION_EXPIRATION_DAYS)
+            is_expired = datetime.utcnow() > expiration_time
+
+            if is_expired:
+                logger.info(f"Session expired for {phone_number}, last used: {db_session.last_used_at}")
+
+            return is_expired
+        except Exception as e:
+            logger.error(f"Error checking session expiration: {e}", exc_info=True)
+            return False  # Don't block on errors
+
+    async def _update_session_activity(self, phone_number: str, api_id: int, api_hash: str, user_id: Optional[int] = None):
+        """
+        Update session activity timestamp in database.
+
+        Args:
+            phone_number: Phone number
+            api_id: API ID
+            api_hash: API Hash
+            user_id: User ID (optional, will be looked up if not provided)
+        """
+        session_repo = self._get_session_repo()
+        if not session_repo:
+            return
+
+        try:
+            db_session = await session_repo.get_by_phone(phone_number)
+
+            if db_session:
+                # Update existing session
+                await session_repo.update_last_used(db_session)
+                logger.debug(f"Updated session activity for {phone_number}")
+            elif user_id:
+                # Create new session record
+                session_name = self._get_session_name(phone_number, api_id, api_hash)
+                session_path = self._get_session_path(session_name)
+                await session_repo.create(
+                    user_id=user_id,
+                    phone_number=phone_number,
+                    session_file_path=str(session_path),
+                    api_id=str(api_id),
+                    api_hash=api_hash
+                )
+                logger.info(f"Created session record in database for {phone_number}")
+        except Exception as e:
+            logger.error(f"Error updating session activity: {e}", exc_info=True)
 
     def _get_session_name(self, phone_number: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> str:
         """
@@ -137,8 +226,17 @@ class TelegramService:
         session_name = self._get_session_name(phone_number, api_id, api_hash)
         logger.info(f"[GET_OR_CREATE_CLIENT] Session name: {session_name}")
 
+        # Check if session is expired (>7 days)
+        is_expired = await self._is_session_expired(phone_number)
+        if is_expired:
+            logger.info(f"[GET_OR_CREATE_CLIENT] Session expired for {phone_number}, logging out")
+            try:
+                await self.logout(phone_number, api_id, api_hash)
+            except Exception as e:
+                logger.error(f"Error during auto-logout of expired session: {e}", exc_info=True)
+
         # Check if client is already active
-        if session_name in self._active_clients:
+        if session_name in self._active_clients and not is_expired:
             client = self._active_clients[session_name]
             logger.info(f"[GET_OR_CREATE_CLIENT] Found active client, connected: {client.is_connected()}")
             if client.is_connected():
@@ -179,18 +277,35 @@ class TelegramService:
             ValidationError: If phone number is invalid
         """
         try:
-            # Create temporary client with StringSession
+            # Create client with file-based session directly to avoid migration issues
+            # This ensures the session is properly saved and authorized from the start
             client = await self.create_client(
                 api_id,
                 api_hash,
-                use_string_session=True
+                phone_number=phone_number
             )
             await client.connect()
 
             # Check if already authorized
             if await client.is_user_authorized():
-                logger.info(f"User {phone_number} already authorized")
-                raise AuthenticationError("Usuário já autorizado. Faça logout primeiro.")
+                logger.info(f"User {phone_number} already authorized - auto-logout to allow re-authentication")
+                # Auto-logout: disconnect client and delete session file
+                # This ensures user can re-authenticate even if they have an existing session
+                try:
+                    await self.logout(phone_number, api_id, api_hash)
+                    logger.info(f"Successfully logged out {phone_number}, recreating client for new authentication")
+
+                    # Recreate client for fresh authentication
+                    client = await self.create_client(
+                        api_id,
+                        api_hash,
+                        phone_number=phone_number
+                    )
+                    await client.connect()
+                except Exception as logout_error:
+                    logger.error(f"Error during auto-logout for {phone_number}: {logout_error}", exc_info=True)
+                    # Continue anyway - the session file might not exist
+                    pass
 
             # Send verification code
             result = await client.send_code_request(phone_number)
@@ -241,22 +356,8 @@ class TelegramService:
             # Sign in with code
             user = await client.sign_in(phone_number, phone_code, phone_code_hash=phone_code_hash)
 
-            # Save session to file
+            # Get session name and store active client
             session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
-            session_path = self._get_session_path(session_name)
-
-            # If using StringSession, we need to migrate to file session
-            if isinstance(client.session, StringSession):
-                # Get session string
-                session_string = client.session.save()
-                # Create file session client with the session string
-                # Note: TelegramClient adds .session extension automatically, so we remove it from the path
-                session_path_without_ext = str(session_path).replace('.session', '')
-                file_client = TelegramClient(session_path_without_ext, client.api_id, client.api_hash)
-                await file_client.connect()
-                # The file session is automatically saved by Telethon
-                await client.disconnect()
-                client = file_client
 
             # Store active client
             self._active_clients[session_name] = client
@@ -267,7 +368,9 @@ class TelegramService:
                 "api_hash": client.api_hash
             }
 
-            logger.info(f"User {phone_number} authenticated successfully")
+            is_authorized = await client.is_user_authorized()
+            logger.info(f"User {phone_number} authenticated successfully, authorized: {is_authorized}")
+
             return {
                 "user_id": user.id,
                 "username": getattr(user, "username", None),
@@ -311,10 +414,11 @@ class TelegramService:
             user = await client.sign_in(password=password)
 
             # Now the client is fully authenticated
-            # We need to save this to a persistent file-based session
             if phone_number:
                 session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
-                session_path = self._get_session_path(session_name)
+
+                # Store active client
+                self._active_clients[session_name] = client
 
                 # Store API credentials for this session
                 self._session_credentials[session_name] = {
@@ -322,12 +426,8 @@ class TelegramService:
                     "api_hash": client.api_hash
                 }
 
-                # Keep the StringSession client active for now
-                # It will be migrated to file session after the temp session is cleaned up
-                self._active_clients[session_name] = client
-
-                logger.info(f"2FA authentication successful for {phone_number}")
-                logger.info(f"Session type: {type(client.session).__name__}")
+                is_authorized = await client.is_user_authorized()
+                logger.info(f"2FA authentication successful for {phone_number}, authorized: {is_authorized}")
 
             return {
                 "user_id": user.id,
@@ -473,6 +573,72 @@ class TelegramService:
                     await client.disconnect()
                 del self._active_clients[session_name]
                 logger.info(f"Disconnected client session {session_name}")
+
+    async def logout(self, phone_number: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> None:
+        """
+        Logout user by disconnecting Telegram client and deleting session file.
+
+        Args:
+            phone_number: Phone number
+            api_id: Telegram API ID (optional, will try to get from stored credentials)
+            api_hash: Telegram API Hash (optional, will try to get from stored credentials)
+
+        Raises:
+            SessionError: If session doesn't exist
+        """
+        try:
+            # Try to get credentials from stored session if not provided
+            if api_id is None or api_hash is None:
+                stored_creds = self.get_session_credentials(phone_number, api_id, api_hash)
+                if stored_creds:
+                    api_id = api_id or stored_creds.get("api_id")
+                    api_hash = api_hash or stored_creds.get("api_hash")
+
+            # Fallback to settings if still not available
+            if api_id is None or api_hash is None:
+                from app.config import settings
+                api_id = api_id or settings.api_id
+                api_hash = api_hash or settings.api_hash
+
+            session_name = self._get_session_name(phone_number, api_id, api_hash)
+            session_path = self._get_session_path(session_name)
+
+            # Disconnect active client if exists
+            if session_name in self._active_clients:
+                client = self._active_clients[session_name]
+                if client.is_connected():
+                    await client.disconnect()
+                    logger.info(f"Disconnected Telegram client for {phone_number}")
+                del self._active_clients[session_name]
+
+            # Remove from session credentials
+            if session_name in self._session_credentials:
+                del self._session_credentials[session_name]
+
+            # Delete session file
+            if session_path.exists():
+                session_path.unlink()
+                logger.info(f"Deleted session file: {session_path}")
+            else:
+                logger.warning(f"Session file not found: {session_path}")
+
+            # Deactivate session in database
+            session_repo = self._get_session_repo()
+            if session_repo:
+                try:
+                    db_session = await session_repo.get_by_phone(phone_number)
+                    if db_session:
+                        await session_repo.delete(db_session)
+                        logger.info(f"Deleted session from database for {phone_number}")
+                except Exception as db_error:
+                    logger.error(f"Error deleting session from database: {db_error}", exc_info=True)
+                    # Don't fail logout if database operation fails
+
+            logger.info(f"Logout successful for {phone_number}")
+
+        except Exception as e:
+            logger.error(f"Error during logout for {phone_number}: {e}", exc_info=True)
+            raise SessionError(f"Erro ao fazer logout: {str(e)}")
 
     async def cleanup(self) -> None:
         """Disconnect all active clients."""

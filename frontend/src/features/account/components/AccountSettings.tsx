@@ -1,22 +1,44 @@
 import { User, Phone, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
+import { useSessionStore } from '@/store/session.store';
 import { useAccount } from '../hooks/useAccount';
 import { PlanCard } from './PlanCard';
 import { UsageStats } from './UsageStats';
 import { UpgradePlan } from './UpgradePlan';
 import { toast } from 'sonner';
 import { ROUTES } from '@/lib/constants';
+import { telegramApi } from '@/api/telegram.api';
 
 export function AccountSettings() {
   const navigate = useNavigate();
   const logout = useAuthStore((state) => state.logout);
+  const sessionData = useSessionStore((state) => state.session);
   const { accountData, limits, usage, isLoading } = useAccount();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  const handleLogout = () => {
-    toast.success('Você foi desconectado');
-    logout();
-    navigate(ROUTES.LOGIN);
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      // Call backend to disconnect Telegram session and delete session file
+      await telegramApi.logout({
+        api_id: sessionData?.apiId,
+        api_hash: sessionData?.apiHash,
+      });
+
+      toast.success('Você foi desconectado');
+      logout();
+      navigate(ROUTES.LOGIN);
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast.error('Erro ao desconectar. Fazendo logout local...');
+      // Even if backend logout fails, clear local session
+      logout();
+      navigate(ROUTES.LOGIN);
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   if (isLoading) {
@@ -68,10 +90,11 @@ export function AccountSettings() {
 
           <button
             onClick={handleLogout}
-            className="flex items-center gap-2 px-4 py-2 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-md transition-colors"
+            disabled={isLoggingOut}
+            className="flex items-center gap-2 px-4 py-2 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <LogOut className="h-4 w-4" />
-            <span className="text-sm font-medium">Sair</span>
+            <span className="text-sm font-medium">{isLoggingOut ? 'Saindo...' : 'Sair'}</span>
           </button>
         </div>
       </div>

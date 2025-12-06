@@ -159,12 +159,13 @@ class CopyService:
                     api_id = api_id or settings.api_id
                     api_hash = api_hash or settings.api_hash
                 
-                client = await self._telegram_service.create_client(
-                    api_id,
-                    api_hash,
-                    phone_number=phone_number
+                # Use get_or_create_client to reuse existing active client
+                # This prevents SQLite "database is locked" errors
+                client = await self._telegram_service.get_or_create_client(
+                    phone_number=phone_number,
+                    api_id=api_id,
+                    api_hash=api_hash
                 )
-                await client.connect()
 
             if not await client.is_user_authorized():
                 raise SessionError("Session não autorizada. Por favor, refaça o login.")
@@ -332,12 +333,13 @@ class CopyService:
                     api_id = api_id or settings.api_id
                     api_hash = api_hash or settings.api_hash
                 
-                client = await self._telegram_service.create_client(
-                    api_id,
-                    api_hash,
-                    phone_number=phone_number
+                # Use get_or_create_client to reuse existing active client
+                # This prevents SQLite "database is locked" errors
+                client = await self._telegram_service.get_or_create_client(
+                    phone_number=phone_number,
+                    api_id=api_id,
+                    api_hash=api_hash
                 )
-                await client.connect()
 
             if not await client.is_user_authorized():
                 raise SessionError("Session não autorizada. Por favor, refaça o login.")

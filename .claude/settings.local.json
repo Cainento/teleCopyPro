@@ -31,7 +31,8 @@
       "Bash(npx tsc:*)",
       "Bash(docker-compose ps:*)",
       "Bash(tee:*)",
-      "Bash(flyctl secrets:*)"
+      "Bash(flyctl secrets:*)",
+      "Bash(flyctl logs:*)"
     ],
     "deny": [],
     "ask": []
