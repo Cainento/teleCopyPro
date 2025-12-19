@@ -208,4 +208,14 @@ temp/
 
 # Documentation (ignore all markdown files)
 *.md
+!README.md
+!backend/README.md
+!frontend/README.md
+!PHASE_2_SUMMARY.md
+!SETUP.md
+!DEPLOYMENT_GUIDE.md
+!DATABASE_SETUP.md
+!STRIPE_ENVIRONMENT_SWITCHING.md
+!STRIPE_QUICK_REFERENCE.md
+!WEBHOOK_QUICK_START.md
 frontend/.env.production
