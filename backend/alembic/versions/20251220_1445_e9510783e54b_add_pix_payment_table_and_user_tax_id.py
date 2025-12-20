@@ -25,7 +25,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.Integer(), nullable=False),
     sa.Column('order_id', sa.String(length=50), nullable=False),
     sa.Column('reference_id', sa.String(length=100), nullable=False),
-    sa.Column('plan', sa.Enum('free', 'premium', 'enterprise', name='userplan'), nullable=False),
+    sa.Column('plan', sa.Enum('free', 'premium', 'enterprise', name='userplan', create_type=False), nullable=False),
     sa.Column('billing_cycle', sa.String(length=20), nullable=False),
     sa.Column('amount', sa.Integer(), nullable=False),
     sa.Column('currency', sa.String(length=10), nullable=False),
