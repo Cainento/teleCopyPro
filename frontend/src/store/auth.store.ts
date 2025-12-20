@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { STORAGE_KEYS } from '@/lib/constants';
 import { telegramApi } from '@/api/telegram.api';
-import type { SessionData } from '@/types';
+import type { SessionData, User } from '@/types';
 
 /**
  * Estado da store de autenticação
@@ -10,12 +10,16 @@ import type { SessionData } from '@/types';
 export interface AuthState {
   /** Dados da sessão atual do usuário (null se não autenticado) */
   session: SessionData | null;
+  /** Dados completos do usuário autenticado */
+  user: User | null;
   /** Flag indicando se o usuário está autenticado */
   isAuthenticated: boolean;
   /** Função para fazer login e salvar sessão */
   login: (data: SessionData) => void;
   /** Função para fazer logout e limpar sessão */
   logout: () => void;
+  /** Define os dados do usuário */
+  setUser: (user: User) => void;
   /** Verifica se a sessão ainda é válida com o backend */
   checkSession: () => Promise<boolean>;
 }
@@ -66,16 +70,11 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       session: null,
+      user: null, // Initial state for user
       isAuthenticated: false,
 
       /**
        * Faz login do usuário e salva sessão
-       *
-       * @param data - Dados da sessão do Telegram
-       * @param data.phoneNumber - Número de telefone do usuário
-       * @param data.apiId - API ID do Telegram
-       * @param data.apiHash - API Hash do Telegram
-       * @param data.expiresAt - Timestamp de expiração da sessão
        */
       login: (data: SessionData) => {
         set({
@@ -86,14 +85,20 @@ export const useAuthStore = create<AuthState>()(
 
       /**
        * Faz logout do usuário e limpa sessão
-       *
-       * Remove todos os dados da sessão do estado e do localStorage
        */
       logout: () => {
         set({
           session: null,
+          user: null, // Clear user on logout
           isAuthenticated: false,
         });
+      },
+
+      /**
+       * Define os dados do usuário
+       */
+      setUser: (user: User) => {
+        set({ user });
       },
 
       /**
@@ -129,7 +134,7 @@ export const useAuthStore = create<AuthState>()(
         }
 
         try {
-          // Verify session with backend (will use JWT token from API client)
+          // Verify session with backend
           const status = await telegramApi.getStatus();
 
           if (!status.connected) {
@@ -137,9 +142,39 @@ export const useAuthStore = create<AuthState>()(
             return false;
           }
 
+          // Fetch user info to get admin status
+          try {
+            const { userApi } = await import('@/api/user.api');
+            const userInfo = await userApi.getAccountInfo(session.phoneNumber);
+            console.log('User Info Fetch:', userInfo);
+
+
+            // Map AccountInfoResponse to User
+            // account info: phone_number, display_name, plan, plan_expiry, usage_count, created_at, is_admin
+            // User: id, email, name, plan, usage_count, plan_expiry, created_at, updated_at, is_admin
+
+            const user: User = {
+              id: 0, // ID is not returned by getAccountInfo, we can ignore or fetch elsewhere if needed.
+              email: '', // Not returned
+              name: userInfo.display_name || '',
+              plan: userInfo.plan.toUpperCase() as any,
+              usage_count: userInfo.usage_count,
+              plan_expiry: userInfo.plan_expiry,
+              created_at: userInfo.created_at || '',
+              updated_at: '',
+              is_admin: userInfo.is_admin
+            };
+
+            console.log('Setting user state:', user);
+            set({ user });
+          } catch (e) {
+            console.error("Failed to fetch user info", e);
+            // Don't fail auth check just because profile fetch failed? 
+            // Actually, if we can't get admin status, AdminRoute will fail safely (user.is_admin undefined -> falsy)
+          }
+
           return true;
         } catch (error) {
-          // If 401 Unauthorized, token is invalid/expired
           if ((error as any)?.response?.status === 401) {
             get().logout();
           }

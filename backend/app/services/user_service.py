@@ -75,6 +75,7 @@ class UserService:
             stripe_subscription_id=db_user.stripe_subscription_id,
             subscription_status=db_user.subscription_status,
             subscription_period_end=db_user.subscription_period_end,
+            is_admin=db_user.is_admin,
             created_at=db_user.created_at,
             updated_at=db_user.updated_at
         )

@@ -219,3 +219,4 @@ temp/
 !STRIPE_QUICK_REFERENCE.md
 !WEBHOOK_QUICK_START.md
 frontend/.env.production
+!claude.md

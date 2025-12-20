@@ -29,6 +29,7 @@ export interface AccountInfoResponse {
   plan_expiry: string | null;
   usage_count: number;
   created_at: string | null;
+  is_admin: boolean;
 }
 
 export interface PlanFeature {

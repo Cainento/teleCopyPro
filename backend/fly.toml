@@ -11,6 +11,11 @@ primary_region = "gru"  # São Paulo, Brazil
   PORT = "8000"
   ENVIRONMENT = "production"
   SESSION_FOLDER = "/data/sessions"
+  PAGBANK_ENVIRONMENT = "production"
+  PAGBANK_PREMIUM_MONTHLY_PRICE = "5990"
+  PAGBANK_PREMIUM_ANNUAL_PRICE = "59900"
+  PAGBANK_ENTERPRISE_MONTHLY_PRICE = "9990"
+  PAGBANK_ENTERPRISE_ANNUAL_PRICE = "99900"
 
 [mounts]
   source = "telegram_sessions"

@@ -200,10 +200,10 @@ class TelegramService:
             session_path = self._get_session_path(session_name)
             # TelegramClient adds .session extension automatically, so remove it
             session = str(session_path).replace('.session', '')
-            logger.info(f"[CREATE_CLIENT] Session path: {session_path}, Cleaned session: {session}")
+            logger.debug(f"[CREATE_CLIENT] Session path: {session_path}, Cleaned session: {session}")
 
         client = TelegramClient(session, api_id, api_hash)
-        logger.info(f"[CREATE_CLIENT] Created client with session: {session}")
+        logger.debug(f"[CREATE_CLIENT] Created client with session: {session}")
         return client
 
     async def get_or_create_client(
@@ -224,7 +224,7 @@ class TelegramService:
             TelegramClient instance
         """
         session_name = self._get_session_name(phone_number, api_id, api_hash)
-        logger.info(f"[GET_OR_CREATE_CLIENT] Session name: {session_name}")
+        logger.debug(f"[GET_OR_CREATE_CLIENT] Session name: {session_name}")
 
         # Check if session is expired (>7 days)
         is_expired = await self._is_session_expired(phone_number)
@@ -238,16 +238,16 @@ class TelegramService:
         # Check if client is already active
         if session_name in self._active_clients and not is_expired:
             client = self._active_clients[session_name]
-            logger.info(f"[GET_OR_CREATE_CLIENT] Found active client, connected: {client.is_connected()}")
+            logger.debug(f"[GET_OR_CREATE_CLIENT] Found active client, connected: {client.is_connected()}")
             if client.is_connected():
                 return client
-            logger.info(f"[GET_OR_CREATE_CLIENT] Active client not connected, creating new one")
+            logger.debug(f"[GET_OR_CREATE_CLIENT] Active client not connected, creating new one")
 
         # Create new client
-        logger.info(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number}")
+        logger.debug(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number}")
         client = await self.create_client(api_id, api_hash, phone_number=phone_number)
         await client.connect()
-        logger.info(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
+        logger.debug(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
 
         # Store active client
         self._active_clients[session_name] = client
@@ -476,7 +476,7 @@ class TelegramService:
         # Try to get credentials from stored session if not provided
         if api_id is None or api_hash is None:
             stored_creds = self.get_session_credentials(phone_number, api_id, api_hash)
-            logger.info(f"[CHECK_SESSION] Stored credentials: {stored_creds is not None}")
+            logger.debug(f"[CHECK_SESSION] Stored credentials: {stored_creds is not None}")
             if stored_creds:
                 api_id = api_id or stored_creds.get("api_id")
                 api_hash = api_hash or stored_creds.get("api_hash")
@@ -484,7 +484,7 @@ class TelegramService:
         # Fallback to settings if still not available
         if api_id is None or api_hash is None:
             from app.config import settings
-            logger.info(f"[CHECK_SESSION] Falling back to settings API credentials")
+            logger.debug(f"[CHECK_SESSION] Falling back to settings API credentials")
             api_id = api_id or settings.api_id
             api_hash = api_hash or settings.api_hash
 
@@ -492,9 +492,9 @@ class TelegramService:
         session_name = self._get_session_name(phone_number, api_id, api_hash)
         session_path = self._get_session_path(session_name)
 
-        logger.info(f"[CHECK_SESSION] Phone: {phone_number}, API ID: {api_id}, Session name: {session_name}, Session path: {session_path}")
+        logger.debug(f"[CHECK_SESSION] Phone: {phone_number}, API ID: {api_id}, Session name: {session_name}, Session path: {session_path}")
 
-        logger.info(f"[CHECK_SESSION] Session path exists: {session_path.exists()}")
+        logger.debug(f"[CHECK_SESSION] Session path exists: {session_path.exists()}")
         if not session_path.exists():
             logger.warning(f"[CHECK_SESSION] Session file not found at {session_path}")
             return TelegramSession(
@@ -507,11 +507,11 @@ class TelegramService:
             )
 
         try:
-            logger.info(f"[CHECK_SESSION] Getting or creating client for {phone_number}")
+            logger.debug(f"[CHECK_SESSION] Getting or creating client for {phone_number}")
             client = await self.get_or_create_client(phone_number, api_id, api_hash)
-            logger.info(f"[CHECK_SESSION] Client connected: {client.is_connected()}")
+            logger.debug(f"[CHECK_SESSION] Client connected: {client.is_connected()}")
             is_authorized = await client.is_user_authorized()
-            logger.info(f"[CHECK_SESSION] Is authorized: {is_authorized}")
+            logger.debug(f"[CHECK_SESSION] Is authorized: {is_authorized}")
 
             if is_authorized:
                 me = await client.get_me()

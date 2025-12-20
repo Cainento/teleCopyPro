@@ -23,6 +23,7 @@ class UserBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="User name")
     plan: UserPlan = Field(default=UserPlan.FREE, description="User plan type")
     usage_count: int = Field(default=0, ge=0, description="Number of copy operations used")
+    is_admin: bool = Field(default=False, description="Whether the user has admin privileges")
 
 
 class UserCreate(UserBase):

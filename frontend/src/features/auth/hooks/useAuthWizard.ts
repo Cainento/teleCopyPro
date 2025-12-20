@@ -145,6 +145,9 @@ export function useAuthWizard() {
       expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 dias (JWT expiration)
     });
 
+    // Fetch user info (including admin status) immediately
+    useAuthStore.getState().checkSession();
+
     // Atualizar estado da sessão
     setStatus('connected');
     setUserInfo(userId, username);

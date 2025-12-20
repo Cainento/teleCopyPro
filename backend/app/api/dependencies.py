@@ -8,8 +8,10 @@ from app.database.connection import get_db
 from app.services.copy_service import CopyService
 from app.services.session_service import SessionService
 from app.services.stripe_service import StripeService
+from app.services.pagbank_service import PagBankService
 from app.services.telegram_service import TelegramService
 from app.services.user_service import UserService
+from app.services.admin_service import AdminService
 from app.core.security import verify_token
 from app.config import settings
 from app.models.user import User as PydanticUser
@@ -94,6 +96,32 @@ def get_stripe_service(db: AsyncSession = Depends(get_db)) -> StripeService:
     return StripeService(db)
 
 
+def get_pagbank_service(db: AsyncSession = Depends(get_db)) -> PagBankService:
+    """
+    Get PagBankService instance with database session.
+
+    Args:
+        db: Database session
+
+    Returns:
+        PagBankService instance
+    """
+    return PagBankService(db)
+
+
+def get_admin_service(db: AsyncSession = Depends(get_db)) -> AdminService:
+    """
+    Get AdminService instance with database session.
+
+    Args:
+        db: Database session
+
+    Returns:
+        AdminService instance
+    """
+    return AdminService(db)
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     user_service: UserService = Depends(get_user_service),
@@ -174,7 +202,7 @@ async def get_current_user(
             logger.error(f"Error updating session activity: {e}", exc_info=True)
             # Don't fail authentication if activity update fails
 
-        logger.info(f"Authenticated user: {phone_number}")
+        logger.debug(f"Authenticated user: {phone_number}")
         return user
 
     except Exception as e:

@@ -58,7 +58,15 @@ def setup_logger(name: Optional[str] = None) -> logging.Logger:
         )
         file_handler.setLevel(log_level)
         file_handler.setFormatter(detailed_formatter)
+        file_handler.setFormatter(detailed_formatter)
         logger.addHandler(file_handler)
+
+    # Suppress noisy loggers
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+    logging.getLogger("telethon").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
     return logger
 

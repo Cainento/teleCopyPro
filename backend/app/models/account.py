@@ -17,6 +17,7 @@ class AccountInfoResponse(BaseModel):
     plan_expiry: Optional[datetime] = Field(None, description="Plan expiration date")
     usage_count: int = Field(default=0, ge=0, description="Number of copy operations used")
     created_at: Optional[datetime] = Field(None, description="Account creation date")
+    is_admin: bool = Field(default=False, description="Whether the user has admin privileges")
 
     class Config:
         """Pydantic config."""

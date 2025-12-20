@@ -1,8 +1,9 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Copy, Briefcase, User, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Copy, Briefcase, User, Menu, X, Shield } from 'lucide-react';
 import { ROUTES } from '@/lib/constants';
 import { useState } from 'react';
 import { cn } from '@/lib/cn';
+import { useAuthStore } from '@/store/auth.store';
 
 const navigation = [
   {
@@ -33,6 +34,16 @@ interface SidebarProps {
 
 export function Sidebar({ className }: SidebarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const { user } = useAuthStore();
+
+  const navItems = [
+    ...navigation,
+    ...(user?.is_admin ? [{
+      name: 'Admin',
+      href: '/admin',
+      icon: Shield,
+    }] : [])
+  ];
 
   return (
     <>
@@ -67,7 +78,7 @@ export function Sidebar({ className }: SidebarProps) {
       >
         {/* Navigation */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {navigation.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.name}
               to={item.href}

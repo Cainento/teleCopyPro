@@ -10,16 +10,18 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.api.dependencies import (
     get_copy_service,
     get_current_user,
+    get_pagbank_service,
     get_session_service,
     get_stripe_service,
     get_telegram_service,
     get_user_service,
+    get_admin_service,
 )
 from app.core.exceptions import AuthenticationError, NotFoundError, TeleCopyException, ValidationError
 from app.core.logger import get_logger
 from app.core.security import create_access_token
 from app.config import settings
-from app.models.user import User as PydanticUser
+from app.models.user import User as PydanticUser, UserPlan
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -37,16 +39,19 @@ from app.models.copy_job import CopyJobCreate, CopyJobResponse
 from app.models.session import SessionResponse
 from app.models.user import UserCreate, UserResponse
 from app.services.copy_service import CopyService
+from app.services.pagbank_service import PagBankService
 from app.services.session_service import SessionService
 from app.services.stripe_service import StripeService
 from app.services.telegram_service import TelegramService
 from app.services.user_service import UserService
+from app.services.admin_service import AdminService
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 user_router = APIRouter(prefix="/api/user", tags=["user"])
 stripe_router = APIRouter(prefix="/api/stripe", tags=["stripe"])
+pagbank_router = APIRouter(prefix="/api/pagbank", tags=["pagbank"])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin"])
 webhook_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -683,8 +688,10 @@ async def get_account_info(
             plan=user.plan,
             plan_expiry=user.plan_expiry,
             usage_count=user.usage_count,
-            created_at=user.created_at
+            created_at=user.created_at,
+            is_admin=user.is_admin
         )
+        logger.info(f"Returning account info for {phone_number}: is_admin={user.is_admin}")
         return JSONResponse(
             content=response_data.model_dump(mode='json'),
             status_code=200
@@ -1233,3 +1240,340 @@ async def process_subscription_manually(
         logger.error(f"Error in process_subscription_manually: {e}", exc_info=True)
         raise TeleCopyException(f"Erro ao processar assinatura: {str(e)}", 500)
 
+
+
+# ==================== Admin Routes ====================
+
+
+@admin_router.get("/stats")
+async def get_admin_stats(
+    current_user: PydanticUser = Depends(get_current_user),
+    admin_service: AdminService = Depends(get_admin_service),
+):
+    """
+    Get aggregated dashboard statistics.
+    Requires admin privileges.
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso negado. Apenas administradores.", 403)
+        
+    try:
+        stats = await admin_service.get_dashboard_stats()
+        return JSONResponse(content=stats, status_code=200)
+    except Exception as e:
+        logger.error(f"Error getting admin stats: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao obter estatísticas: {str(e)}", 500)
+
+
+@admin_router.get("/users")
+async def get_admin_users(
+    skip: int = 0,
+    limit: int = 20,
+    search: Optional[str] = None,
+    current_user: PydanticUser = Depends(get_current_user),
+    admin_service: AdminService = Depends(get_admin_service),
+):
+    """
+    Get paginated list of users.
+    Requires admin privileges.
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso negado. Apenas administradores.", 403)
+        
+    try:
+        result = await admin_service.get_users_paginated(skip, limit, search)
+        
+        # Convert Pydantic models to dict for JSONResponse
+        if result["items"]:
+            result["items"] = [u.model_dump(mode='json') for u in result["items"]]
+            
+        return JSONResponse(content=result, status_code=200)
+    except Exception as e:
+        logger.error(f"Error list admin users: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao listar usuários: {str(e)}", 500)
+
+
+@admin_router.get("/users/{user_id}")
+async def get_admin_user_details(
+    user_id: str,
+    current_user: PydanticUser = Depends(get_current_user),
+    admin_service: AdminService = Depends(get_admin_service),
+):
+    """
+    Get detailed user information.
+    Requires admin privileges.
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso negado. Apenas administradores.", 403)
+        
+    try:
+        details = await admin_service.get_user_details(user_id)
+        if not details:
+            raise NotFoundError("Usuário não encontrado")
+            
+        # Serialize Pydantic user
+        details["user"] = details["user"].model_dump(mode='json')
+        
+        return JSONResponse(content=details, status_code=200)
+    except TeleCopyException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user details: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao obter detalhes: {str(e)}", 500)
+
+
+@admin_router.patch("/users/{user_id}/admin")
+async def update_admin_status(
+    user_id: str,
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    admin_service: AdminService = Depends(get_admin_service),
+):
+    """
+    Promote or demote a user to/from admin.
+    Requires admin privileges.
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso negado. Apenas administradores.", 403)
+        
+    try:
+        data = await request.json()
+        is_admin = data.get("is_admin")
+        
+        if is_admin is None:
+            raise TeleCopyException("Campo 'is_admin' é obrigatório", 400)
+            
+        updated_user = await admin_service.update_user_admin_status(user_id, is_admin)
+        
+        return JSONResponse(
+            content={
+                "message": f"Status de admin atualizado para {updated_user.email}",
+                "user": updated_user.model_dump(mode='json')
+            },
+            status_code=200
+        )
+    except TeleCopyException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating admin status: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao atualizar status: {str(e)}", 500)
+
+
+# ==================== PagBank PIX Routes ====================
+
+
+@pagbank_router.post("/create-pix-order")
+async def create_pix_order(
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    pagbank_service: PagBankService = Depends(get_pagbank_service),
+    user_service: UserService = Depends(get_user_service),
+):
+    """
+    Create a PIX order with QR Code for payment.
+
+    Request body:
+        - plan: str ("premium" or "enterprise")
+        - billing_cycle: str ("monthly" or "annual")
+        - customer_tax_id: str (CPF - 11 digits)
+
+    Returns:
+        JSON with QR code data for payment
+    """
+    try:
+        data = await request.json()
+        plan_str = data.get("plan")
+        billing_cycle = data.get("billing_cycle")
+        customer_tax_id = data.get("customer_tax_id")
+
+        # Validate required fields
+        if not plan_str:
+            raise TeleCopyException("Plano é obrigatório.", 400)
+        if not billing_cycle:
+            raise TeleCopyException("Ciclo de cobrança é obrigatório.", 400)
+        if not customer_tax_id:
+            raise TeleCopyException("CPF é obrigatório.", 400)
+
+        # Validate plan
+        plan_map = {
+            "premium": UserPlan.PREMIUM,
+            "enterprise": UserPlan.ENTERPRISE,
+        }
+        plan = plan_map.get(plan_str.lower())
+        if not plan:
+            raise TeleCopyException("Plano inválido. Use 'premium' ou 'enterprise'.", 400)
+
+        # Validate billing cycle
+        if billing_cycle not in ["monthly", "annual"]:
+            raise TeleCopyException("Ciclo inválido. Use 'monthly' ou 'annual'.", 400)
+
+        # Validate CPF format (11 digits)
+        clean_tax_id = "".join(filter(str.isdigit, customer_tax_id))
+        if len(clean_tax_id) != 11:
+            raise TeleCopyException("CPF deve conter 11 dígitos.", 400)
+
+        # Get database user model
+        user_db = await user_service.get_db_user_by_phone(current_user.phone_number)
+        if not user_db:
+            raise NotFoundError("Usuário não encontrado.")
+
+        # Update user's tax_id if provided
+        if not user_db.tax_id or user_db.tax_id != clean_tax_id:
+            user_db.tax_id = clean_tax_id
+            await user_service.user_repo.update(user_db)
+
+        # Build webhook URL
+        webhook_base = settings.cors_origins[0] if settings.cors_origins else "https://api.telecopy.com"
+        # Use production API URL for webhook
+        webhook_url = f"{webhook_base.replace('localhost', '127.0.0.1')}/api/webhooks/pagbank"
+
+        # Create PIX order
+        pix_payment = await pagbank_service.create_pix_order(
+            user=user_db,
+            plan=plan,
+            billing_cycle=billing_cycle,
+            webhook_url=webhook_url,
+        )
+
+        # Calculate formatted amount
+        formatted_amount = pagbank_service._format_price(pix_payment.amount)
+
+        return JSONResponse(
+            content={
+                "order_id": pix_payment.order_id,
+                "reference_id": pix_payment.reference_id,
+                "qr_code_text": pix_payment.qr_code_text,
+                "qr_code_url": pix_payment.qr_code_url,
+                "amount": pix_payment.amount,
+                "formatted_amount": formatted_amount,
+                "expiration_date": pix_payment.expiration_date.isoformat() if pix_payment.expiration_date else None,
+                "plan": plan.value,
+                "billing_cycle": billing_cycle,
+                "message": "Pedido PIX criado com sucesso"
+            },
+            status_code=200
+        )
+
+    except NotFoundError as e:
+        raise TeleCopyException(str(e), 404)
+    except TeleCopyException as e:
+        raise
+    except Exception as e:
+        logger.error(f"Error in create_pix_order: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro interno ao criar pedido PIX: {str(e)}", 500)
+
+
+@pagbank_router.get("/order-status/{order_id}")
+async def get_pix_order_status(
+    order_id: str,
+    current_user: PydanticUser = Depends(get_current_user),
+    pagbank_service: PagBankService = Depends(get_pagbank_service),
+):
+    """
+    Get PIX order status.
+
+    Path parameters:
+        - order_id: str (PagBank order ID)
+
+    Returns:
+        JSON with order status
+    """
+    try:
+        # First check our local database
+        pix_payment = await pagbank_service.get_pix_payment_by_order_id(order_id)
+        
+        if not pix_payment:
+            raise TeleCopyException("Pedido não encontrado.", 404)
+
+        # Verify the order belongs to the authenticated user
+        if pix_payment.user_id != current_user.id:
+            raise TeleCopyException("Acesso negado a este pedido.", 403)
+
+        # If still pending, check with PagBank API for updates
+        if pix_payment.status == "pending":
+            try:
+                order_data = await pagbank_service.check_order_status(order_id)
+                
+                # Check if payment was made
+                charges = order_data.get("charges", [])
+                is_paid = any(charge.get("status") == "PAID" for charge in charges)
+                
+                if is_paid:
+                    # Process the payment
+                    await pagbank_service.handle_pix_payment_completed(order_data)
+                    # Refresh the payment record
+                    pix_payment = await pagbank_service.get_pix_payment_by_order_id(order_id)
+            except Exception as e:
+                logger.warning(f"Error checking order status with PagBank: {e}")
+                # Continue with local data
+
+        return JSONResponse(
+            content={
+                "order_id": pix_payment.order_id,
+                "status": pix_payment.status,
+                "plan": pix_payment.plan.value if pix_payment.plan else None,
+                "billing_cycle": pix_payment.billing_cycle,
+                "amount": pix_payment.amount,
+                "paid_at": pix_payment.paid_at.isoformat() if pix_payment.paid_at else None,
+                "expiration_date": pix_payment.expiration_date.isoformat() if pix_payment.expiration_date else None,
+            },
+            status_code=200
+        )
+
+    except TeleCopyException as e:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_pix_order_status: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro interno ao consultar pedido: {str(e)}", 500)
+
+
+@webhook_router.post("/pagbank")
+async def pagbank_webhook(
+    request: Request,
+    pagbank_service: PagBankService = Depends(get_pagbank_service),
+):
+    """
+    Handle PagBank webhook events.
+
+    This endpoint receives events from PagBank about PIX payments.
+
+    Returns:
+        JSON with status
+    """
+    try:
+        # Get raw request body
+        payload = await request.json()
+        
+        logger.info(f"Received PagBank webhook: {payload.get('id', 'unknown')}")
+
+        # Check if this is an order payment notification
+        order_id = payload.get("id")
+        if not order_id:
+            logger.warning("No order_id in PagBank webhook payload")
+            return JSONResponse(
+                content={"status": "ignored", "message": "No order_id in payload"},
+                status_code=200
+            )
+
+        # Check charges for PAID status
+        charges = payload.get("charges", [])
+        is_paid = any(charge.get("status") == "PAID" for charge in charges)
+
+        if is_paid:
+            logger.info(f"Processing paid PIX order: {order_id}")
+            await pagbank_service.handle_pix_payment_completed(payload)
+        else:
+            logger.info(f"PagBank webhook for order {order_id}, not paid yet. Statuses: {[c.get('status') for c in charges]}")
+
+        return JSONResponse(
+            content={"status": "success", "order_id": order_id},
+            status_code=200
+        )
+
+    except Exception as e:
+        logger.error(f"Error in pagbank_webhook: {e}", exc_info=True)
+        # Return 200 to acknowledge receipt, but log the error
+        return JSONResponse(
+            content={"status": "error", "message": str(e)},
+            status_code=200
+        )

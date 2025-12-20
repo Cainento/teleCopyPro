@@ -35,6 +35,14 @@ class AuthenticationError(TeleCopyException):
         super().__init__(message, 401, details)
 
 
+
+class PermissionDenied(TeleCopyException):
+    """Exception for permission denied errors."""
+
+    def __init__(self, message: str = "Permission denied", details: Optional[dict[str, Any]] = None):
+        super().__init__(message, 403, details)
+
+
 class SessionError(TeleCopyException):
     """Exception for session-related errors."""
 

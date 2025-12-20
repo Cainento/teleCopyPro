@@ -87,6 +87,14 @@ class Settings(BaseSettings):
     stripe_enterprise_monthly_price_id: str = Field(default="", description="Stripe Price ID for Enterprise Monthly plan")
     stripe_enterprise_annual_price_id: str = Field(default="", description="Stripe Price ID for Enterprise Annual plan")
 
+    # PagBank Configuration
+    pagbank_token: str = Field(default="", description="PagBank API token (Bearer token)")
+    pagbank_environment: str = Field(default="sandbox", description="PagBank environment (sandbox/production)")
+    pagbank_premium_monthly_price: int = Field(default=5990, description="Premium monthly price in centavos (R$59.90)")
+    pagbank_premium_annual_price: int = Field(default=59900, description="Premium annual price in centavos (R$599.00)")
+    pagbank_enterprise_monthly_price: int = Field(default=9990, description="Enterprise monthly price in centavos (R$99.90)")
+    pagbank_enterprise_annual_price: int = Field(default=99900, description="Enterprise annual price in centavos (R$999.00)")
+
     @field_validator("api_id")
     @classmethod
     def validate_api_id(cls, v: int) -> int:

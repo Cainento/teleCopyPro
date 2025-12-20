@@ -35,7 +35,7 @@ else:
     # In development, use default pool with size limits
     engine = create_async_engine(
         settings.database_url,
-        echo=settings.debug,  # Log SQL queries in debug mode
+        echo=False,  # Log SQL queries in debug mode
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
         pool_pre_ping=True,  # Verify connections before using them

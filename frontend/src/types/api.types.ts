@@ -48,6 +48,7 @@ export interface User {
   plan_expiry?: string | null;
   created_at: string;
   updated_at: string;
+  is_admin: boolean; // Added admin flag
 }
 
 // API Request Types
@@ -116,7 +117,7 @@ export interface JobsResponse {
   jobs: CopyJob[];
 }
 
-export interface JobResponse extends CopyJob {}
+export interface JobResponse extends CopyJob { }
 
 export interface StopJobResponse {
   message: string;

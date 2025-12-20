@@ -12,7 +12,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from app.api.routes import router, user_router, stripe_router, webhook_router, admin_router
+from app.api.routes import router, user_router, stripe_router, pagbank_router, webhook_router, admin_router
 from app.config import settings
 from app.core.exception_handler import (
     global_exception_handler,
@@ -122,6 +122,7 @@ app.add_exception_handler(SessionPasswordNeededError, telethon_exception_handler
 app.include_router(router)
 app.include_router(user_router)
 app.include_router(stripe_router)
+app.include_router(pagbank_router)
 app.include_router(webhook_router)
 app.include_router(admin_router)
 
