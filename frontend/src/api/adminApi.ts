@@ -69,5 +69,13 @@ export const adminApi = {
             is_admin: isAdmin
         });
         return response.data.user;
+    },
+
+    updateUserPlan: async (userId: number, plan: string, days?: number): Promise<User> => {
+        const response = await api.put(`/api/admin/users/${userId}/plan`, {
+            plan,
+            days
+        });
+        return response.data.user;
     }
 };

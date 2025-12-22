@@ -1,5 +1,6 @@
 """Admin service for system administration and statistics."""
 
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from sqlalchemy import func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -174,22 +175,65 @@ class AdminService:
             "invoices_count": len(user.invoices)
         }
 
-    async def update_user_admin_status(self, user_phone: str, is_admin: bool) -> PydanticUser:
+    async def _get_db_user(self, user_id_or_phone: str) -> Optional[DBUser]:
+        """Helper to find db user by id or phone."""
+        if str(user_id_or_phone).isdigit() and len(str(user_id_or_phone)) < 10:
+            query = select(DBUser).where(DBUser.id == int(user_id_or_phone))
+        else:
+            query = select(DBUser).where(DBUser.phone_number == user_id_or_phone)
+        
+        result = await self.db.execute(query)
+        return result.scalar_one_or_none()
+
+    async def update_user_admin_status(self, user_id_or_phone: str, is_admin: bool) -> PydanticUser:
         """
         Update user admin status.
         
         Args:
-            user_phone: User phone number
+            user_id_or_phone: User ID or phone number
             is_admin: New admin status
             
         Returns:
             Updated user
         """
-        db_user = await self.user_service.get_db_user_by_phone(user_phone)
+        db_user = await self._get_db_user(user_id_or_phone)
         if not db_user:
-            raise NotFoundError(f"User {user_phone} not found")
+            raise NotFoundError(f"User {user_id_or_phone} not found")
             
         db_user.is_admin = is_admin
+        await self.db.commit()
+        await self.db.refresh(db_user)
+        
+        return self.user_service._db_to_pydantic(db_user)
+
+    async def update_user_plan(
+        self, 
+        user_id_or_phone: str, 
+        plan: UserPlan, 
+        days: Optional[int] = None
+    ) -> PydanticUser:
+        """
+        Update user plan and expiry.
+        
+        Args:
+            user_id_or_phone: User ID or phone number
+            plan: New plan
+            days: Optional duration in days for premium/enterprise plans
+            
+        Returns:
+            Updated user
+        """
+        db_user = await self._get_db_user(user_id_or_phone)
+        if not db_user:
+            raise NotFoundError(f"User {user_id_or_phone} not found")
+            
+        db_user.plan = plan
+        
+        if plan == UserPlan.FREE:
+            db_user.plan_expiry = None
+        elif days:
+            db_user.plan_expiry = datetime.utcnow() + timedelta(days=days)
+        
         await self.db.commit()
         await self.db.refresh(db_user)
         

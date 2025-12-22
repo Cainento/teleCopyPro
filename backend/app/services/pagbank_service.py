@@ -315,7 +315,10 @@ class PagBankService:
                 if charge.get("status") == "PAID":
                     paid_at_str = charge.get("paid_at")
                     if paid_at_str:
-                        paid_at = datetime.fromisoformat(paid_at_str.replace("-03:00", "+00:00"))
+                        from datetime import timezone
+                        # Convert aware datetime from PagBank to naive UTC for database
+                        dt_aware = datetime.fromisoformat(paid_at_str)
+                        paid_at = dt_aware.astimezone(timezone.utc).replace(tzinfo=None)
                     break
 
             # Update payment status
@@ -338,13 +341,12 @@ class PagBankService:
             user.plan = pix_payment.plan
             user.plan_expiry = plan_expiry
 
-            await self.db.commit()
+            await self.db.flush()
 
             logger.info(f"Successfully processed PIX payment {order_id} for user {user.id}, plan={pix_payment.plan.value}, expiry={plan_expiry}")
 
         except Exception as e:
             logger.error(f"Error handling PIX payment completion: {e}", exc_info=True)
-            await self.db.rollback()
             raise
 
     async def update_expired_payments(self) -> int:

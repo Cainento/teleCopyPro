@@ -1359,6 +1359,49 @@ async def update_admin_status(
         raise TeleCopyException(f"Erro ao atualizar status: {str(e)}", 500)
 
 
+@admin_router.put("/users/{user_id}/plan")
+async def update_user_plan(
+    user_id: str,
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    admin_service: AdminService = Depends(get_admin_service),
+):
+    """
+    Update user plan and expiry.
+    Requires admin privileges.
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso negado. Apenas administradores.", 403)
+        
+    try:
+        data = await request.json()
+        plan_str = data.get("plan")
+        days = data.get("days")
+        
+        if not plan_str:
+            raise TeleCopyException("Campo 'plan' é obrigatório", 400)
+            
+        try:
+            plan = UserPlan(plan_str)
+        except ValueError:
+            raise TeleCopyException(f"Plano inválido: {plan_str}", 400)
+            
+        updated_user = await admin_service.update_user_plan(user_id, plan, days)
+        
+        return JSONResponse(
+            content={
+                "message": f"Plano atualizado para {updated_user.email}",
+                "user": updated_user.model_dump(mode='json')
+            },
+            status_code=200
+        )
+    except TeleCopyException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating user plan: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao atualizar plano: {str(e)}", 500)
+
+
 # ==================== PagBank PIX Routes ====================
 
 
