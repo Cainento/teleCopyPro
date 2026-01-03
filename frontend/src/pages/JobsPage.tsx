@@ -2,16 +2,22 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Header } from '@/components/layout/Header';
 import { JobsList } from '@/features/jobs/components/JobsList';
 import { useJobs } from '@/features/jobs/hooks/useJobs';
-import { useJobPolling } from '@/features/jobs/hooks/useJobPolling';
+
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 
 export function JobsPage() {
   const navigate = useNavigate();
-  const { jobs, isLoading, stopJob, isStoppingJob } = useJobs();
-
-  // Enable intelligent polling for active jobs
-  useJobPolling(jobs);
+  const {
+    jobs,
+    isLoading,
+    stopJob,
+    isStoppingJob,
+    pauseJob,
+    isPausingJob,
+    resumeJob,
+    isResumingJob,
+  } = useJobs();
 
   const handleJobClick = (jobId: string) => {
     navigate(`/jobs/${jobId}`);
@@ -38,8 +44,12 @@ export function JobsPage() {
               <JobsList
                 jobs={jobs}
                 onStop={stopJob}
+                onPause={pauseJob}
+                onResume={resumeJob}
                 onJobClick={handleJobClick}
                 isStoppingJob={isStoppingJob}
+                isPausingJob={isPausingJob}
+                isResumingJob={isResumingJob}
               />
             )}
           </div>

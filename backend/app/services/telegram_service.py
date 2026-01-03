@@ -44,6 +44,7 @@ class TelegramService:
             db: Optional database session for session tracking
         """
         self._active_clients: dict[str, TelegramClient] = {}
+        self._real_time_handlers: dict[str, dict] = {}  # job_id -> {handler, phone_number}
         self._session_credentials: dict[str, dict[str, any]] = {}  # phone_number -> {api_id, api_hash}
         self._session_path = Path(settings.session_folder)
         self._session_path.mkdir(parents=True, exist_ok=True)
@@ -652,4 +653,55 @@ class TelegramService:
                 del self._active_clients[session_name]
 
         logger.info("All Telegram clients cleaned up")
+
+
+    def add_real_time_handler(self, job_id: str, phone_number: str, handler: callable) -> None:
+        """
+        Store real-time handler reference.
+
+        Args:
+            job_id: Job identifier
+            phone_number: Phone number of the client
+            handler: Event handler function
+        """
+        self._real_time_handlers[job_id] = {
+            "handler": handler,
+            "phone_number": phone_number
+        }
+        logger.debug(f"Stored real-time handler for job {job_id}")
+
+    async def remove_real_time_handler(self, job_id: str) -> None:
+        """
+        Remove real-time handler from client and storage.
+
+        Args:
+            job_id: Job identifier
+        """
+        if job_id in self._real_time_handlers:
+            data = self._real_time_handlers[job_id]
+            handler = data["handler"]
+            phone_number = data["phone_number"]
+
+            # Try to find active client and remove handler
+            # We don't have API credentials here, so we try to find by phone number prefix
+            base_name = phone_number.replace("+", "").replace(" ", "").replace("-", "")
+            
+            # Find the correct client session
+            client = None
+            for session_name, active_client in self._active_clients.items():
+                if session_name.startswith(base_name):
+                    client = active_client
+                    break
+            
+            if client:
+                try:
+                    client.remove_event_handler(handler)
+                    logger.info(f"Removed event handler for job {job_id} from client")
+                except Exception as e:
+                    logger.warning(f"Could not remove event handler from client: {e}")
+            else:
+                logger.warning(f"Active client not found for {phone_number} when removing handler for {job_id}")
+
+            del self._real_time_handlers[job_id]
+            logger.debug(f"Removed real-time handler for job {job_id} from storage")
 

@@ -14,6 +14,7 @@ from app.core.exceptions import TeleCopyException
 from app.database.models import User, PixPayment
 from app.database.repositories.user_repository import UserRepository
 from app.models.user import UserPlan
+from app.core.homologation_logger import HomologationLogger
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,7 @@ class PagBankService:
                 del payload["customer"]["phones"]
 
             logger.info(f"Creating PIX order for user {user.id}, plan={plan.value}, billing_cycle={billing_cycle}")
+            logger.info(f"PagBank Request Payload: {payload}")
 
             # Make API request
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -184,6 +186,20 @@ class PagBankService:
                     raise TeleCopyException(f"Erro ao criar pedido PIX: {error_detail}", response.status_code)
 
                 order_data = response.json()
+                logger.info(f"PagBank Response Body: {order_data}")
+
+                # Capture full logs for homologation
+                await HomologationLogger.save_log(
+                    order_id=order_data.get("id", "unknown"),
+                    activity="Create PIX Order",
+                    endpoint=f"{self.api_url}/orders",
+                    method="POST",
+                    request_headers=self._get_headers(),
+                    request_body=payload,
+                    response_status=response.status_code,
+                    response_headers=response.headers,
+                    response_body=order_data
+                )
 
             # Extract QR code data from response
             order_id = order_data.get("id")

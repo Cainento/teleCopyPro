@@ -67,7 +67,13 @@ export function useJobs() {
       return jobsApi.getJobs(session.phoneNumber);
     },
     enabled: !!session,
-    refetchInterval: POLLING_INTERVALS.JOBS_LIST, // 10000ms
+    refetchInterval: (query) => {
+      // Check if there are any active jobs in the data
+      if (query.state.data?.some((job) => job.status === 'running' || job.status === 'pending')) {
+        return POLLING_INTERVALS.JOB_PROGRESS; // 5000ms
+      }
+      return POLLING_INTERVALS.JOBS_LIST; // 15000ms
+    },
     refetchIntervalInBackground: false,
   });
 
@@ -105,7 +111,12 @@ export function useJobs() {
       enabled: !!session && !!jobId,
       refetchInterval: (query) => {
         // Poll active jobs more frequently
-        if (query.state.data?.status === 'running' || query.state.data?.status === 'pending') {
+        // Poll active jobs more frequently
+        if (
+          query.state.data?.status === 'running' ||
+          query.state.data?.status === 'pending' ||
+          query.state.data?.status === 'paused'
+        ) {
           return POLLING_INTERVALS.JOB_PROGRESS; // 5000ms
         }
         return false; // Don't poll completed/failed/stopped jobs
@@ -159,6 +170,68 @@ export function useJobs() {
   });
 
   /**
+   * Mutation: Pausar um job em execução
+   */
+  const pauseJobMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      if (!session) throw new Error('No session');
+      return jobsApi.pauseJob(jobId);
+    },
+    onMutate: async (jobId) => {
+      toast.loading('Pausando job...', { id: jobId });
+      await queryClient.cancelQueries({ queryKey: ['jobs'] });
+      const previousJobs = queryClient.getQueryData<Job[]>(['jobs', session?.phoneNumber]);
+      queryClient.setQueryData<Job[]>(['jobs', session?.phoneNumber], (old) =>
+        old?.map((job) => (job.id === jobId ? { ...job, status: 'paused' as const } : job))
+      );
+      return { previousJobs };
+    },
+    onSuccess: (_data, jobId) => {
+      toast.success('Job pausado com sucesso', { id: jobId });
+    },
+    onError: (_error, jobId, context) => {
+      toast.error('Erro ao pausar job', { id: jobId });
+      if (context?.previousJobs) {
+        queryClient.setQueryData(['jobs', session?.phoneNumber], context.previousJobs);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+
+  /**
+   * Mutation: Retomar um job pausado
+   */
+  const resumeJobMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      if (!session) throw new Error('No session');
+      return jobsApi.resumeJob(jobId);
+    },
+    onMutate: async (jobId) => {
+      toast.loading('Retomando job...', { id: jobId });
+      await queryClient.cancelQueries({ queryKey: ['jobs'] });
+      const previousJobs = queryClient.getQueryData<Job[]>(['jobs', session?.phoneNumber]);
+      queryClient.setQueryData<Job[]>(['jobs', session?.phoneNumber], (old) =>
+        old?.map((job) => (job.id === jobId ? { ...job, status: 'running' as const } : job))
+      );
+      return { previousJobs };
+    },
+    onSuccess: (_data, jobId) => {
+      toast.success('Job retomado com sucesso', { id: jobId });
+    },
+    onError: (_error, jobId, context) => {
+      toast.error('Erro ao retomar job', { id: jobId });
+      if (context?.previousJobs) {
+        queryClient.setQueryData(['jobs', session?.phoneNumber], context.previousJobs);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+
+  /**
    * Estatísticas agregadas dos jobs
    *
    * Calculadas em tempo real a partir da lista de jobs
@@ -168,8 +241,10 @@ export function useJobs() {
     total: jobs.length,
     /** Jobs em execução (status: running) */
     running: jobs.filter((job) => job.status === 'running').length,
-    /** Jobs concluídos com sucesso (status: completed) */
-    completed: jobs.filter((job) => job.status === 'completed').length,
+    /** Jobs pausados (status: paused) */
+    paused: jobs.filter((job) => job.status === 'paused').length,
+    /** Jobs concluídos com sucesso (status: completed ou stopped) */
+    completed: jobs.filter((job) => job.status === 'completed' || job.status === 'stopped').length,
     /** Jobs que falharam (status: failed) */
     failed: jobs.filter((job) => job.status === 'failed').length,
   };
@@ -194,5 +269,13 @@ export function useJobs() {
     stopJob: stopJobMutation.mutate,
     /** Flag indicando se está parando um job */
     isStoppingJob: stopJobMutation.isPending,
+    /** Função para pausar um job */
+    pauseJob: pauseJobMutation.mutate,
+    /** Flag indicando se está pausando um job */
+    isPausingJob: pauseJobMutation.isPending,
+    /** Função para retomar um job */
+    resumeJob: resumeJobMutation.mutate,
+    /** Flag indicando se está retomando um job */
+    isResumingJob: resumeJobMutation.isPending,
   };
 }

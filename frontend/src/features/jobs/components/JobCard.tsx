@@ -1,5 +1,17 @@
 import { memo } from 'react';
-import { Clock, Zap, CheckCircle, XCircle, StopCircle, ArrowRight, Image, MessageSquare, AlertCircle } from 'lucide-react';
+import {
+  Clock,
+  Zap,
+  CheckCircle,
+  XCircle,
+  StopCircle,
+  ArrowRight,
+  Image,
+  MessageSquare,
+  AlertCircle,
+  PauseCircle,
+  PlayCircle,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/cn';
@@ -15,15 +27,23 @@ const parseUTCTimestamp = (timestamp: string) => {
 interface JobCardProps {
   job: Job;
   onStop?: (jobId: string) => void;
+  onPause?: (jobId: string) => void;
+  onResume?: (jobId: string) => void;
   onClick?: (jobId: string) => void;
   isStoppingJob?: boolean;
+  isPausingJob?: boolean;
+  isResumingJob?: boolean;
 }
 
 export const JobCard = memo(function JobCard({
   job,
   onStop,
+  onPause,
+  onResume,
   onClick,
   isStoppingJob,
+  isPausingJob,
+  isResumingJob,
 }: JobCardProps) {
   const statusConfig = {
     pending: {
@@ -37,6 +57,12 @@ export const JobCard = memo(function JobCard({
       label: 'Em Execução',
       color: 'text-primary',
       bgColor: 'bg-primary/10',
+    },
+    paused: {
+      icon: PauseCircle,
+      label: 'Pausado',
+      color: 'text-orange-500',
+      bgColor: 'bg-orange-500/10',
     },
     completed: {
       icon: CheckCircle,
@@ -53,15 +79,14 @@ export const JobCard = memo(function JobCard({
     stopped: {
       icon: StopCircle,
       label: 'Parado',
-      color: 'text-warning',
-      bgColor: 'bg-warning/10',
+      color: 'text-muted-foreground',
+      bgColor: 'bg-muted',
     },
   };
 
-  const config = statusConfig[job.status];
+  const config = statusConfig[job.status] || statusConfig.pending;
   const StatusIcon = config.icon;
 
-  const isActive = job.status === 'running' || job.status === 'pending';
 
   return (
     <div
@@ -153,15 +178,47 @@ export const JobCard = memo(function JobCard({
 
         {/* Actions */}
         <div className="flex items-center gap-2">
-          {isActive && onStop && (
+          {/* Pause Button (only for running jobs) */}
+          {job.status === 'running' && onPause && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPause(job.id);
+              }}
+              disabled={isPausingJob}
+              className="px-3 py-1 text-xs font-medium bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 rounded transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              <PauseCircle className="h-3 w-3" />
+              {isPausingJob ? 'Pausando...' : 'Pausar'}
+            </button>
+          )}
+
+          {/* Resume Button (only for paused jobs) */}
+          {job.status === 'paused' && onResume && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onResume(job.id);
+              }}
+              disabled={isResumingJob}
+              className="px-3 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 rounded transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              <PlayCircle className="h-3 w-3" />
+              {isResumingJob ? 'Retomar' : 'Continuar'}
+            </button>
+          )}
+
+          {/* Stop Button (for running, pending or paused jobs) */}
+          {(job.status === 'running' || job.status === 'pending' || job.status === 'paused') && onStop && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onStop(job.id);
               }}
               disabled={isStoppingJob}
-              className="px-3 py-1 text-xs font-medium bg-warning/10 text-warning hover:bg-warning/20 rounded transition-colors disabled:opacity-50"
+              className="px-3 py-1 text-xs font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 rounded transition-colors disabled:opacity-50 flex items-center gap-1"
             >
+              <StopCircle className="h-3 w-3" />
               {isStoppingJob ? 'Parando...' : 'Parar'}
             </button>
           )}

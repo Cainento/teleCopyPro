@@ -139,4 +139,24 @@ export const jobsApi = {
     const response = await apiClient.post<StopJobResponse>(`/api/telegram/copy/${jobId}/stop`);
     return response.data;
   },
+
+  /**
+   * Pausa um job em execução
+   * 
+   * @param jobId - ID do job a ser pausado
+   */
+  pauseJob: async (jobId: string): Promise<{ message: string; jobId: string }> => {
+    const response = await apiClient.post<{ message: string; jobId: string }>(`/api/telegram/copy/${jobId}/pause`);
+    return response.data;
+  },
+
+  /**
+   * Retoma um job pausado
+   * 
+   * @param jobId - ID do job a ser retomado
+   */
+  resumeJob: async (jobId: string): Promise<{ message: string; jobId: string }> => {
+    const response = await apiClient.post<{ message: string; jobId: string }>(`/api/telegram/copy/${jobId}/resume`);
+    return response.data;
+  },
 };

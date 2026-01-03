@@ -32,7 +32,8 @@ class CopyService:
         self.db = db
         self.job_repo = JobRepository(db)
         self.user_repo = UserRepository(db)
-        self._real_time_handlers: dict[str, Callable] = {}  # Keep in memory (not serializable)
+        self.job_repo = JobRepository(db)
+        self.user_repo = UserRepository(db)
 
     def _db_to_pydantic(self, db_job) -> PydanticCopyJob:
         """Convert database job to Pydantic model."""
@@ -51,6 +52,53 @@ class CopyService:
             completed_at=db_job.completed_at,
             error_message=db_job.error_message
         )
+
+    async def _get_entity_with_retry(self, client, entity_id):
+        """
+        Attempt to get entity with retry mechanism via get_dialogs.
+        Helps when the entity is not in the local cache.
+        """
+        try:
+            return await client.get_entity(entity_id)
+        except Exception as e:
+            # "Could not find the input entity" or similar
+            logger.warning(f"Entity {entity_id} not found in cache ({e}), refreshing dialogs...")
+            try:
+                # Refresh dialog cache
+                await client.get_dialogs(limit=None)
+                # Retry getting entity with original ID
+                return await client.get_entity(entity_id)
+            except Exception as retry_error:
+                logger.warning(f"Failed to resolve {entity_id} after refresh: {retry_error}")
+                
+                # Fallback: Check if it looks like a Basic Group ID that should be a Channel (Supergroup) ID
+                # This handles cases where user provides "-123" but it's actually "-100123"
+                if isinstance(entity_id, int) and entity_id < 0 and entity_id > -1000000000000:
+                    converted_id = -1000000000000 - abs(entity_id)
+                    logger.info(f"Attempting fallback to supergroup ID: {converted_id}")
+                    try:
+                        return await client.get_entity(converted_id)
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback to {converted_id} also failed: {fallback_error}")
+                        pass
+                
+                # Diagnostic logging
+                try:
+                     dialogs = await client.get_dialogs(limit=None)
+                     logger.info(f"Debug: Fetched {len(dialogs)} dialogs. Checking for ID {entity_id}...")
+                     found_in_dialogs = any(d.entity.id == abs(entity_id) or d.entity.id == abs(int(str(entity_id).replace("-100", ""))) for d in dialogs if hasattr(d, 'entity'))
+                     if found_in_dialogs:
+                         logger.warning(f"Debug: Entity ID matches a dialog, but access failed. Possible access hash mismatch.")
+                     else:
+                         logger.warning(f"Debug: Entity ID NOT found in user's dialog list.")
+                except Exception as debug_error:
+                    logger.warning(f"Debug check failed: {debug_error}")
+
+                # If all else fails, raise a helpful error
+                logger.error(f"Could not resolve entity {entity_id}")
+                raise CopyServiceError(f"Não foi possível encontrar o canal/grupo {entity_id}. Verifique se:\n1. Você é membro do canal/grupo\n2. O ID está correto\n3. Se for público, tente usar o @username")
+
+
 
     async def create_historical_job(
         self,
@@ -175,24 +223,17 @@ class CopyService:
 
             # Get source entity
             try:
-                # Try to convert channel ID to proper format
+                # Try to convert channel ID to proper format if it's an integer
                 source_id = source_channel
                 try:
-                    source_int = int(source_channel)
-                    # If it's a negative number without -100 prefix, add it (channel format)
-                    if source_int < 0 and source_int > -100000000000:
-                        # Convert new format to old format: -1000000000000 - abs(new_id)
-                        source_id = -1000000000000 - abs(source_int)
-                        logger.info(f"Converted source channel ID from {source_int} to {source_id}")
-                    else:
-                        source_id = source_int
-                        logger.info(f"Using source channel ID as-is: {source_id}")
+                    source_id = int(source_channel)
+                    logger.info(f"Using numeric source channel ID: {source_id}")
                 except (ValueError, TypeError):
                     logger.info(f"Using source channel as username: {source_channel}")
-                    pass  # Keep as string if not numeric (username)
+                    pass
 
                 logger.info(f"Attempting to get entity for source: {source_id} (type: {type(source_id)})")
-                source_entity = await client.get_entity(source_id)
+                source_entity = await self._get_entity_with_retry(client, source_id)
                 logger.info(f"Successfully got source entity: {source_entity}")
             except Exception as e:
                 logger.error(f"Failed to get source entity for {source_channel} (converted to {source_id}): {e}", exc_info=True)
@@ -200,24 +241,17 @@ class CopyService:
 
             # Get target entity
             try:
-                # Try to convert channel ID to proper format
+                # Try to convert channel ID to proper format if it's an integer
                 target_id = target_channel
                 try:
-                    target_int = int(target_channel)
-                    # If it's a negative number without -100 prefix, add it (channel format)
-                    if target_int < 0 and target_int > -100000000000:
-                        # Convert new format to old format: -1000000000000 - abs(new_id)
-                        target_id = -1000000000000 - abs(target_int)
-                        logger.info(f"Converted target channel ID from {target_int} to {target_id}")
-                    else:
-                        target_id = target_int
-                        logger.info(f"Using target channel ID as-is: {target_id}")
+                    target_id = int(target_channel)
+                    logger.info(f"Using numeric target channel ID: {target_id}")
                 except (ValueError, TypeError):
                     logger.info(f"Using target channel as username: {target_channel}")
-                    pass  # Keep as string if not numeric (username)
+                    pass
 
                 logger.info(f"Attempting to get entity for target: {target_id} (type: {type(target_id)})")
-                target_entity = await client.get_entity(target_id)
+                target_entity = await self._get_entity_with_retry(client, target_id)
                 logger.info(f"Successfully got target entity: {target_entity}")
             except Exception as e:
                 logger.error(f"Failed to get target entity for {target_channel} (converted to {target_id}): {e}", exc_info=True)
@@ -278,7 +312,8 @@ class CopyService:
         target_channel: str,
         copy_media: bool = True,
         api_id: Optional[int] = None,
-        api_hash: Optional[str] = None
+        api_hash: Optional[str] = None,
+        job_id: Optional[str] = None
     ) -> PydanticCopyJob:
         """
         Start real-time copying of messages from source to target channel.
@@ -290,6 +325,7 @@ class CopyService:
             copy_media: Whether to copy media files
             api_id: Telegram API ID (optional, will try to get from stored credentials)
             api_hash: Telegram API Hash (optional, will try to get from stored credentials)
+            job_id: Optional existing job ID (for resuming)
 
         Returns:
             CopyJob for the real-time copy operation
@@ -303,16 +339,21 @@ class CopyService:
         if not db_user:
             raise SessionError(f"User not found for phone {phone_number}")
 
-        job_id = str(uuid.uuid4())
-
-        # Create job in database
-        db_job = await self.job_repo.create(
-            job_id=job_id,
-            user_id=db_user.id,
-            source_channel=source_channel,
-            destination_channel=target_channel,
-            mode="real_time"
-        )
+        if job_id:
+            # Resuming existing job
+            db_job = await self.job_repo.get_by_id(job_id)
+            if not db_job:
+                raise CopyServiceError(f"Job {job_id} not found")
+        else:
+            # Create new job
+            job_id = str(uuid.uuid4())
+            db_job = await self.job_repo.create(
+                job_id=job_id,
+                user_id=db_user.id,
+                source_channel=source_channel,
+                destination_channel=target_channel,
+                mode="real_time"
+            )
 
         try:
             # Get client - API credentials should be stored in session
@@ -345,40 +386,27 @@ class CopyService:
                 raise SessionError("Session não autorizada. Por favor, refaça o login.")
 
             # Get entities
+            # Get entities
             # Try to convert channel IDs to proper format
             source_id = source_channel
             try:
-                source_int = int(source_channel)
-                # If it's a negative number without -100 prefix, add it (channel format)
-                if source_int < 0 and source_int > -100000000000:
-                    # Convert new format to old format: -1000000000000 - abs(new_id)
-                    source_id = -1000000000000 - abs(source_int)
-                    logger.info(f"Converted source channel ID from {source_int} to {source_id}")
-                else:
-                    source_id = source_int
-                    logger.info(f"Using source channel ID as-is: {source_id}")
+                source_id = int(source_channel)
+                logger.info(f"Using numeric source channel ID: {source_id}")
             except (ValueError, TypeError):
                 logger.info(f"Using source channel as username: {source_channel}")
-                pass  # Keep as string if not numeric (username)
+                pass
 
             target_id = target_channel
             try:
-                target_int = int(target_channel)
-                # If it's a negative number without -100 prefix, add it (channel format)
-                if target_int < 0 and target_int > -100000000000:
-                    # Convert new format to old format: -1000000000000 - abs(new_id)
-                    target_id = -1000000000000 - abs(target_int)
-                    logger.info(f"Converted target channel ID from {target_int} to {target_id}")
-                else:
-                    target_id = target_int
-                    logger.info(f"Using target channel ID as-is: {target_id}")
+                target_id = int(target_channel)
+                logger.info(f"Using numeric target channel ID: {target_id}")
             except (ValueError, TypeError):
                 logger.info(f"Using target channel as username: {target_channel}")
-                pass  # Keep as string if not numeric (username)
+                pass
 
             logger.info(f"Attempting to get entities - source: {source_id}, target: {target_id}")
-            source_entity = await client.get_entity(source_id)
-            target_entity = await client.get_entity(target_id)
+            source_entity = await self._get_entity_with_retry(client, source_id)
+            target_entity = await self._get_entity_with_retry(client, target_id)
             logger.info(f"Successfully got both entities")
 
             # Create event handler
@@ -386,16 +414,26 @@ class CopyService:
                 """Handle new messages from source channel."""
                 # Import here to avoid circular imports
                 from app.database.connection import AsyncSessionLocal
+                from app.database.repositories.job_repository import JobRepository
+                
+                logger.debug(f"[Handler {job_id}] Message received: {event.message.id}")
 
                 # Create a new database session for this handler
                 async with AsyncSessionLocal() as handler_db:
                     try:
                         if copy_media or not event.message.media:
-                            await client.send_message(target_entity, event.message)
                             # Update database (use fresh query to avoid stale data)
                             handler_repo = JobRepository(handler_db)
                             fresh_job = await handler_repo.get_by_id(job_id)
-                            if fresh_job and fresh_job.status == "running":
+                            
+                            if not fresh_job:
+                                logger.warning(f"[Handler {job_id}] Job not found in DB, stopping processing")
+                                return
+
+                            logger.debug(f"[Handler {job_id}] Current DB status: {fresh_job.status}")
+
+                            if fresh_job.status == "running":
+                                await client.send_message(target_entity, event.message)
                                 await handler_repo.update_progress(
                                     fresh_job,
                                     fresh_job.copied_messages + 1,
@@ -403,12 +441,28 @@ class CopyService:
                                     fresh_job.failed_messages
                                 )
                                 await handler_db.commit()
-                                logger.debug(f"Forwarded message {event.message.id} from {source_channel} to {target_channel}")
+                                logger.info(f"[Handler {job_id}] Forwarded message {event.message.id}")
+                            elif fresh_job.status in ["stopped", "failed", "paused"]:
+                                 # Job is in a terminal state or paused, remove handler to stop processing
+                                 logger.warning(f"[Handler {job_id}] Job is {fresh_job.status}, removing handler and stopping processing.")
+                                 try:
+                                     client.remove_event_handler(message_handler)
+                                     # Also notify TelegramService to clear the reference
+                                     if hasattr(self, '_telegram_service'):
+                                         # Use a fire-and-forget task or just ignore ensuring consistency for now as the handler is dead
+                                         pass
+                                 except Exception as remove_error:
+                                     logger.error(f"[Handler {job_id}] Failed to remove self: {remove_error}")
+                                 return
+                            else:
+                                 logger.warning(f"[Handler {job_id}] Job status {fresh_job.status} unknown, skipping message")
+                                 return
                     except Exception as e:
                         try:
                             # Update database with failure
                             handler_repo = JobRepository(handler_db)
                             fresh_job = await handler_repo.get_by_id(job_id)
+                            # Verify status again
                             if fresh_job and fresh_job.status == "running":
                                 await handler_repo.update_progress(
                                     fresh_job,
@@ -428,7 +482,8 @@ class CopyService:
                 events.NewMessage(chats=source_entity)
             )
 
-            self._real_time_handlers[job_id] = message_handler
+            # Store handler in TelegramService (Singleton)
+            self._telegram_service.add_real_time_handler(job_id, phone_number, message_handler)
 
             # Update job status to running
             db_job = await self.job_repo.update_status(db_job, "running")
@@ -441,6 +496,62 @@ class CopyService:
             raise CopyServiceError(f"Erro ao iniciar cópia em tempo real: {str(e)}") from e
 
         return self._db_to_pydantic(db_job)
+
+    async def pause_real_time_copy(self, job_id: str) -> None:
+        """
+        Pause a real-time copy job.
+
+        Args:
+            job_id: Job identifier
+
+        Raises:
+            CopyServiceError: If job is not found or cannot be paused
+        """
+        logger.info(f"Attempting to pause job {job_id}")
+        db_job = await self.job_repo.get_by_id(job_id)
+        if not db_job:
+            raise CopyServiceError(f"Job {job_id} não encontrado")
+
+        if db_job.status != "running":
+            raise CopyServiceError(f"Apenas jobs em execução podem ser pausados (status atual: {db_job.status})")
+
+        # Remove event handler via TelegramService
+        await self._telegram_service.remove_real_time_handler(job_id)
+        
+        # Update status
+        await self.job_repo.update_status(db_job, "paused")
+        logger.info(f"Job {job_id} paused successfully")
+
+    async def resume_real_time_copy(self, job_id: str) -> PydanticCopyJob:
+        """
+        Resume a paused real-time copy job.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            CopyJob instance
+
+        Raises:
+            CopyServiceError: If job is not found or cannot be resumed
+        """
+        logger.info(f"Attempting to resume job {job_id}")
+        db_job = await self.job_repo.get_by_id(job_id)
+        if not db_job:
+            raise CopyServiceError(f"Job {job_id} não encontrado")
+
+        if db_job.status != "paused":
+            raise CopyServiceError(f"Apenas jobs pausados podem ser retomados (status atual: {db_job.status})")
+
+        # Resume by calling start with existing job ID
+        # Note: We assume copy_media=True as it's not persisted in DB currently
+        return await self.start_real_time_copy(
+            phone_number=db_job.user.phone_number,
+            source_channel=db_job.source_channel,
+            target_channel=db_job.destination_channel,
+            copy_media=True,
+            job_id=job_id
+        )
 
     async def stop_real_time_copy(self, job_id: str) -> None:
         """
@@ -465,12 +576,8 @@ class CopyService:
             logger.warning(f"Job {job_id} already in terminal state: {db_job.status}")
             raise CopyServiceError(f"Job {job_id} já foi finalizado (status: {db_job.status})")
 
-        # Remove real-time handler if exists
-        if job_id in self._real_time_handlers:
-            logger.info(f"Removing real-time handler for job {job_id}")
-            # Note: Telethon doesn't provide easy way to remove handlers
-            # The handler will stop when client disconnects
-            del self._real_time_handlers[job_id]
+        # Remove real-time handler via TelegramService
+        await self._telegram_service.remove_real_time_handler(job_id)
 
         # Update job status
         logger.info(f"Updating job {job_id} status to 'stopped'")

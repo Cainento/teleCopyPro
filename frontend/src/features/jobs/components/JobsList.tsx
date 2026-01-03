@@ -8,17 +8,25 @@ import type { Job } from '@/api/types';
 interface JobsListProps {
   jobs: Job[];
   onStop?: (jobId: string) => void;
+  onPause?: (jobId: string) => void;
+  onResume?: (jobId: string) => void;
   onJobClick?: (jobId: string) => void;
   isStoppingJob?: boolean;
+  isPausingJob?: boolean;
+  isResumingJob?: boolean;
 }
 
-type JobStatus = 'all' | 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
+type JobStatus = 'all' | 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped';
 
 export function JobsList({
   jobs,
   onStop,
+  onPause,
+  onResume,
   onJobClick,
   isStoppingJob,
+  isPausingJob,
+  isResumingJob,
 }: JobsListProps) {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,7 +38,12 @@ export function JobsList({
 
     // Filter by status
     if (statusFilter !== 'all') {
-      filtered = filtered.filter((job) => job.status === statusFilter);
+      if (statusFilter === 'completed') {
+        // Special case: completed filter includes both 'completed' and 'stopped'
+        filtered = filtered.filter((job) => job.status === 'completed' || job.status === 'stopped');
+      } else {
+        filtered = filtered.filter((job) => job.status === statusFilter);
+      }
     }
 
     // Filter by search query
@@ -56,6 +69,11 @@ export function JobsList({
       count: jobs.filter((j) => j.status === 'running').length,
     },
     {
+      value: 'paused',
+      label: 'Pausados',
+      count: jobs.filter((j) => j.status === 'paused').length,
+    },
+    {
       value: 'pending',
       label: 'Pendentes',
       count: jobs.filter((j) => j.status === 'pending').length,
@@ -63,18 +81,14 @@ export function JobsList({
     {
       value: 'completed',
       label: 'Concluídos',
-      count: jobs.filter((j) => j.status === 'completed').length,
+      count: jobs.filter((j) => j.status === 'completed' || j.status === 'stopped').length,
     },
     {
       value: 'failed',
       label: 'Falhados',
       count: jobs.filter((j) => j.status === 'failed').length,
     },
-    {
-      value: 'stopped',
-      label: 'Parados',
-      count: jobs.filter((j) => j.status === 'stopped').length,
-    },
+    // 'stopped' status removed from filters list as it is merged into 'completed'
   ];
 
   return (
@@ -164,8 +178,12 @@ export function JobsList({
               key={job.id}
               job={job}
               onStop={onStop}
+              onPause={onPause}
+              onResume={onResume}
               onClick={onJobClick}
               isStoppingJob={isStoppingJob}
+              isPausingJob={isPausingJob}
+              isResumingJob={isResumingJob}
             />
           ))}
         </div>

@@ -1,5 +1,6 @@
 // Job Status
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
+// Job Status
+export type JobStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped';
 
 // Session Status
 export type SessionStatus = 'disconnected' | 'waiting_code' | 'waiting_password' | 'connected';

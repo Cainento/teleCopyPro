@@ -20,14 +20,14 @@ const PLAN_CONFIG = {
   },
   PREMIUM: {
     name: 'Premium',
-    color: 'text-warning',
-    bgColor: 'bg-warning/10',
+    color: 'text-primary',
+    bgColor: 'bg-primary/10',
     icon: Crown,
   },
   ENTERPRISE: {
     name: 'Enterprise',
-    color: 'text-primary',
-    bgColor: 'bg-primary/10',
+    color: 'text-warning',
+    bgColor: 'bg-warning/10',
     icon: Crown,
   },
 };

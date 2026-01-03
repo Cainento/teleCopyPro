@@ -663,6 +663,89 @@ async def stop_copy(
         raise TeleCopyException(f"Erro interno ao parar job: {str(e)}", 500)
 
 
+@router.post("/copy/{job_id}/pause")
+async def pause_copy(
+    job_id: str,
+    current_user: PydanticUser = Depends(get_current_user),
+    copy_service: CopyService = Depends(get_copy_service),
+):
+    """
+    Pause a real-time copy job for authenticated user.
+
+    Path parameters:
+        - job_id: str
+
+    Returns:
+        JSON with success message
+    """
+    try:
+        # Verify the job belongs to the authenticated user
+        job = await copy_service.get_job(job_id)
+        if not job:
+            raise TeleCopyException(f"Job {job_id} não encontrado.", 404)
+        if job.phone_number != current_user.phone_number:
+            raise TeleCopyException("Acesso negado a este job.", 403)
+
+        logger.info(f"Pausing job {job_id}")
+        await copy_service.pause_real_time_copy(job_id)
+        logger.info(f"Job {job_id} paused successfully")
+        return JSONResponse(
+            content={
+                "message": f"Job {job_id} pausado com sucesso.",
+                "job_id": job_id
+            },
+            status_code=200
+        )
+    except TeleCopyException as e:
+        logger.error(f"TeleCopyException in pause_copy: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error in pause_copy: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro interno ao pausar job: {str(e)}", 500)
+
+
+@router.post("/copy/{job_id}/resume")
+async def resume_copy(
+    job_id: str,
+    current_user: PydanticUser = Depends(get_current_user),
+    copy_service: CopyService = Depends(get_copy_service),
+):
+    """
+    Resume a paused real-time copy job for authenticated user.
+
+    Path parameters:
+        - job_id: str
+
+    Returns:
+        JSON with success message and new job info
+    """
+    try:
+        # Verify the job belongs to the authenticated user
+        job = await copy_service.get_job(job_id)
+        if not job:
+            raise TeleCopyException(f"Job {job_id} não encontrado.", 404)
+        if job.phone_number != current_user.phone_number:
+            raise TeleCopyException("Acesso negado a este job.", 403)
+
+        logger.info(f"Resuming job {job_id}")
+        job = await copy_service.resume_real_time_copy(job_id)
+        logger.info(f"Job {job_id} resumed successfully")
+        return JSONResponse(
+            content={
+                "message": f"Job {job_id} retomado com sucesso.",
+                "job_id": job.id,
+                "status": job.status
+            },
+            status_code=200
+        )
+    except TeleCopyException as e:
+        logger.error(f"TeleCopyException in resume_copy: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error in resume_copy: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro interno ao retomar job: {str(e)}", 500)
+
+
 # User account management endpoints
 
 @user_router.get("/account")

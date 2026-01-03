@@ -16,6 +16,7 @@ primary_region = "gru"  # São Paulo, Brazil
   PAGBANK_PREMIUM_ANNUAL_PRICE = "59900"
   PAGBANK_ENTERPRISE_MONTHLY_PRICE = "9990"
   PAGBANK_ENTERPRISE_ANNUAL_PRICE = "99900"
+  PAGBANK_ENABLE_HOMOLOGATION_LOGS = "true"
 
 [mounts]
   source = "telegram_sessions"
