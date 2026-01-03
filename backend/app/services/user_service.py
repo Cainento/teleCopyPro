@@ -344,6 +344,35 @@ class UserService:
 
         return None
 
+    async def check_and_downgrade_expired_plans_by_phone(self, phone_number: str) -> Optional[PydanticUser]:
+        """
+        Check if user's plan is expired and downgrade to free if needed.
+        Uses phone number for Telegram-based authentication flow.
+
+        Args:
+            phone_number: User's phone number
+
+        Returns:
+            Updated user if downgraded, None otherwise
+        """
+        db_user = await self.user_repo.get_by_phone(phone_number)
+        if not db_user:
+            return None
+
+        pydantic_user = self._db_to_pydantic(db_user)
+        if self.is_plan_expired(pydantic_user):
+            updated_user = await self.user_repo.update_plan(
+                db_user,
+                plan=UserPlan.FREE,
+                plan_expiry=None
+            )
+            await self.db.commit()  # Ensure changes are committed
+
+            logger.info(f"Downgraded expired plan for user phone={phone_number}")
+            return self._db_to_pydantic(updated_user)
+
+        return None
+
     # Phone number-based methods (for Telegram authentication)
 
     async def get_user_by_phone(self, phone_number: str) -> Optional[PydanticUser]:

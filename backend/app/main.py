@@ -13,6 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.api.routes import router, user_router, stripe_router, pagbank_router, webhook_router, admin_router
+from app.api.admin_homologation import router as admin_homologation_router
 from app.config import settings
 from app.core.exception_handler import (
     global_exception_handler,
@@ -23,6 +24,7 @@ from app.core.exceptions import TeleCopyException
 from app.core.logger import get_logger, setup_logger
 from app.database.connection import close_db
 from app.services.telegram_service import TelegramService
+from app.services.plan_expiry_scheduler import plan_expiry_scheduler
 
 # Setup logging
 setup_logger()
@@ -46,10 +48,22 @@ async def lifespan(app: FastAPI):
     logger.info(f"=" * 60)
     logger.info(f"")
 
+    # Start plan expiry scheduler (checks for expired PIX payment plans hourly)
+    try:
+        await plan_expiry_scheduler.start()
+    except Exception as e:
+        logger.error(f"Error starting plan expiry scheduler: {e}", exc_info=True)
+
     yield
 
     # Shutdown
     logger.info("Shutting down application...")
+
+    # Stop plan expiry scheduler
+    try:
+        await plan_expiry_scheduler.stop()
+    except Exception as e:
+        logger.error(f"Error stopping plan expiry scheduler: {e}", exc_info=True)
 
     # Cleanup Telegram clients
     try:
@@ -125,6 +139,7 @@ app.include_router(stripe_router)
 app.include_router(pagbank_router)
 app.include_router(webhook_router)
 app.include_router(admin_router)
+app.include_router(admin_homologation_router)
 
 # Serve frontend static files
 frontend_path = Path(__file__).parent.parent.parent / "frontend" / "src"

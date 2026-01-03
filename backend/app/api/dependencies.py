@@ -202,6 +202,18 @@ async def get_current_user(
             logger.error(f"Error updating session activity: {e}", exc_info=True)
             # Don't fail authentication if activity update fails
 
+        # Check and auto-downgrade expired plans (PIX payments have expiry dates)
+        try:
+            if user_service.is_plan_expired(user):
+                logger.info(f"Plan expired for user {phone_number}, auto-downgrading to FREE")
+                downgraded_user = await user_service.check_and_downgrade_expired_plans_by_phone(phone_number)
+                if downgraded_user:
+                    user = downgraded_user
+                    logger.info(f"Successfully downgraded expired plan for {phone_number}")
+        except Exception as e:
+            logger.error(f"Error checking plan expiry: {e}", exc_info=True)
+            # Don't fail authentication if expiry check fails
+
         logger.debug(f"Authenticated user: {phone_number}")
         return user
 
@@ -212,4 +224,17 @@ async def get_current_user(
             detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def get_current_admin_user(
+    current_user: PydanticUser = Depends(get_current_user)
+) -> PydanticUser:
+    """确认当前用户是管理员."""
+    if not current_user.is_admin:
+        logger.warning(f"Access denied for non-admin user: {current_user.phone_number}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Não tem permissão de administrador"
+        )
+    return current_user
 

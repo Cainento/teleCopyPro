@@ -1620,3 +1620,30 @@ async def pagbank_webhook(
             content={"status": "error", "message": str(e)},
             status_code=200
         )
+
+
+@admin_router.post("/check-expired-plans")
+async def admin_check_expired_plans(
+    current_user: PydanticUser = Depends(get_current_user),
+):
+    """
+    Admin endpoint to manually check and downgrade expired plans.
+
+    Returns:
+        JSON with count of downgraded plans
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso de administrador necessário", 403)
+
+    from app.services.plan_expiry_scheduler import PlanExpiryScheduler
+    scheduler = PlanExpiryScheduler()
+    count = await scheduler.check_and_downgrade_all_expired()
+
+    return JSONResponse(
+        content={
+            "status": "success",
+            "message": f"Verificados e rebaixados {count} planos expirados",
+            "downgraded_count": count
+        },
+        status_code=200
+    )
