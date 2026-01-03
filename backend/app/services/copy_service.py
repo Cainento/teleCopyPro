@@ -220,6 +220,7 @@ class CopyService:
 
             # Update job status to running
             db_job = await self.job_repo.update_status(db_job, "running")
+            await self.db.commit()
 
             # Get source entity
             try:
@@ -279,6 +280,7 @@ class CopyService:
                         # Update progress every 10 messages
                         if count % 10 == 0:
                             await self.job_repo.update_progress(db_job, count, total_messages, failed)
+                            await self.db.commit()
 
                         if progress_callback and total_messages > 0:
                             progress_callback(count, total_messages)
@@ -293,6 +295,7 @@ class CopyService:
             # Final progress update
             db_job = await self.job_repo.update_progress(db_job, count, total_messages, failed)
             db_job = await self.job_repo.update_status(db_job, "completed")
+            await self.db.commit()
 
             logger.info(
                 f"Copy job {job_id} completed: {count} messages copied, {failed} failed"
@@ -300,6 +303,7 @@ class CopyService:
 
         except Exception as e:
             await self.job_repo.update_status(db_job, "failed", error_message=str(e))
+            await self.db.commit()
             logger.error(f"Copy job {job_id} failed: {e}", exc_info=True)
             raise CopyServiceError(f"Erro ao copiar mensagens: {str(e)}") from e
 

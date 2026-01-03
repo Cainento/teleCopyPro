@@ -7,6 +7,7 @@ import stripe
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.database.connection import AsyncSessionLocal
 from app.api.dependencies import (
     get_copy_service,
     get_current_user,
@@ -478,15 +479,22 @@ async def copy_channel(
             job = await copy_service.create_historical_job(
                 phone_number, source_channel, target_channel, copy_media
             )
+            # Commit immediately to ensure background task can see the job
+            # The background task uses a separate session, so it needs the data to be persisted
+            await copy_service.db.commit()
             
             # Start historical copy in background
+            # Start historical copy in background
             async def copy_task():
-                try:
-                    await copy_service.copy_messages_historical(
-                        phone_number, source_channel, target_channel, copy_media, api_id, api_hash, job.id
-                    )
-                except Exception as e:
-                    logger.error(f"Background copy task failed: {e}", exc_info=True)
+                async with AsyncSessionLocal() as session:
+                    try:
+                        # Instantiate a new CopyService with the fresh session
+                        background_copy_service = CopyService(telegram_service, session)
+                        await background_copy_service.copy_messages_historical(
+                            phone_number, source_channel, target_channel, copy_media, api_id, api_hash, job.id
+                        )
+                    except Exception as e:
+                        logger.error(f"Background copy task failed: {e}", exc_info=True)
 
             background_tasks.add_task(copy_task)
             message = f"Cópia histórica iniciada de {source_channel} para {target_channel}."
