@@ -1,5 +1,6 @@
 """Dependency injection for API routes."""
 
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -201,10 +202,23 @@ async def get_current_user(
             session_repo = SessionRepository(db)
             db_session = await session_repo.get_by_phone(phone_number)
             if db_session:
-                await session_repo.update_last_used(db_session)
-                logger.debug(f"Updated session activity for {phone_number}")
+                # Update session activity only if > 5 minutes passed to avoid database locking
+                should_update = True
+                if db_session.last_used_at:
+                    time_diff = datetime.utcnow() - db_session.last_used_at
+                    if time_diff.total_seconds() < 300:  # 5 minutes
+                        should_update = False
+                
+                if should_update:
+                    await session_repo.update_last_used(db_session)
+                    logger.debug(f"Updated session activity for {phone_number}")
         except Exception as e:
             logger.error(f"Error updating session activity: {e}", exc_info=True)
+            # Rollback session to prevent poisoning subsequent operations in this request
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             # Don't fail authentication if activity update fails
 
         # Check and auto-downgrade expired plans (PIX payments have expiry dates)
