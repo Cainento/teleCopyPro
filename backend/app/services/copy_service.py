@@ -294,6 +294,15 @@ class CopyService:
 
                         # Update progress every 10 messages
                         if count % 10 == 0:
+                            # Refresh job status from DB to check for pause/stop
+                            await self.db.refresh(db_job)
+                            if db_job.status in ["paused", "stopped"]:
+                                logger.info(f"Job {job_id} {db_job.status} during execution, stopping loop")
+                                # Commit final progress before returning
+                                await self.job_repo.update_progress(db_job, count, total_messages, failed)
+                                await self.db.commit()
+                                return self._db_to_pydantic(db_job)
+
                             await self.job_repo.update_progress(db_job, count, total_messages, failed)
                             await self.db.commit()
 
@@ -307,13 +316,16 @@ class CopyService:
                     logger.warning(f"Failed to copy message {message.id}: {e}")
                     continue
 
-            # Final progress update
-            db_job = await self.job_repo.update_progress(db_job, count, total_messages, failed)
-            db_job = await self.job_repo.update_status(db_job, "completed")
-            await self.db.commit()
+            # Final progress update - only if loop completed naturally
+            # Retrieve latest status one last time
+            await self.db.refresh(db_job)
+            if db_job.status not in ["paused", "stopped"]:
+                db_job = await self.job_repo.update_progress(db_job, count, total_messages, failed)
+                db_job = await self.job_repo.update_status(db_job, "completed")
+                await self.db.commit()
 
             logger.info(
-                f"Copy job {job_id} completed: {count} messages copied, {failed} failed"
+                f"Copy job {job_id} finished ({db_job.status}): {count} messages copied, {failed} failed"
             )
 
         except Exception as e:
