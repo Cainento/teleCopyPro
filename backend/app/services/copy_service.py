@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import CopyServiceError, SessionError
 from app.core.logger import get_logger
 from app.database.repositories.job_repository import JobRepository
+from app.database.repositories.session_repository import SessionRepository
 from app.database.repositories.user_repository import UserRepository
 from app.models.copy_job import CopyJob as PydanticCopyJob, CopyJobStatus
 from app.services.telegram_service import TelegramService
@@ -196,10 +197,24 @@ class CopyService:
             else:
                 # Try to get API credentials
                 if api_id is None or api_hash is None:
+                    # 1. Try memory
                     stored_creds = self._telegram_service.get_session_credentials(phone_number)
                     if stored_creds:
                         api_id = api_id or stored_creds.get("api_id")
                         api_hash = api_hash or stored_creds.get("api_hash")
+                    
+                    # 2. Try database (persistence fix)
+                    if api_id is None or api_hash is None:
+                        try:
+                            # Use existing DB session
+                            session_repo = SessionRepository(self.db)
+                            db_session = await session_repo.get_by_phone(phone_number)
+                            if db_session and db_session.api_id and db_session.api_hash:
+                                logger.info(f"Retrieved credentials from database for {phone_number} (historical)")
+                                api_id = api_id or int(db_session.api_id)
+                                api_hash = api_hash or db_session.api_hash
+                        except Exception as e:
+                            logger.error(f"Error retrieving credentials from DB: {e}", exc_info=True)
                 
                 # Fallback to settings
                 if api_id is None or api_hash is None:
@@ -367,11 +382,25 @@ class CopyService:
             else:
                 # Try to get API credentials
                 if api_id is None or api_hash is None:
+                    # 1. Try memory
                     stored_creds = self._telegram_service.get_session_credentials(phone_number)
                     if stored_creds:
                         api_id = api_id or stored_creds.get("api_id")
                         api_hash = api_hash or stored_creds.get("api_hash")
-                
+                    
+                    # 2. Try database (persistence fix)
+                    if api_id is None or api_hash is None:
+                        try:
+                            # Use existing DB session
+                            session_repo = SessionRepository(self.db)
+                            db_session = await session_repo.get_by_phone(phone_number)
+                            if db_session and db_session.api_id and db_session.api_hash:
+                                logger.info(f"Retrieved credentials from database for {phone_number}")
+                                api_id = api_id or int(db_session.api_id)
+                                api_hash = api_hash or db_session.api_hash
+                        except Exception as e:
+                            logger.error(f"Error retrieving credentials from DB: {e}", exc_info=True)
+
                 # Fallback to settings
                 if api_id is None or api_hash is None:
                     from app.config import settings
