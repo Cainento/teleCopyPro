@@ -474,13 +474,26 @@ class TelegramService:
             TelegramSession with status information
         """
         # First, ensure we have API credentials before generating session name
-        # Try to get credentials from stored session if not provided
+        # Try to get credentials from stored session (in-memory) if not provided
         if api_id is None or api_hash is None:
             stored_creds = self.get_session_credentials(phone_number, api_id, api_hash)
-            logger.debug(f"[CHECK_SESSION] Stored credentials: {stored_creds is not None}")
+            logger.debug(f"[CHECK_SESSION] In-memory credentials: {stored_creds is not None}")
             if stored_creds:
                 api_id = api_id or stored_creds.get("api_id")
                 api_hash = api_hash or stored_creds.get("api_hash")
+
+        # Try to get credentials from database if still not available
+        if api_id is None or api_hash is None:
+            session_repo = self._get_session_repo()
+            if session_repo:
+                try:
+                    db_session = await session_repo.get_by_phone(phone_number)
+                    if db_session and db_session.api_id and db_session.api_hash:
+                        logger.debug(f"[CHECK_SESSION] Found credentials in database for {phone_number}")
+                        api_id = api_id or int(db_session.api_id)
+                        api_hash = api_hash or db_session.api_hash
+                except Exception as e:
+                    logger.error(f"[CHECK_SESSION] Error getting credentials from database: {e}", exc_info=True)
 
         # Fallback to settings if still not available
         if api_id is None or api_hash is None:

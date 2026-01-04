@@ -4,28 +4,96 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
 from app.core.exceptions import SessionError
 from app.core.logger import get_logger
+from app.database.repositories.session_repository import SessionRepository
 from app.models.session import TemporarySession
 from app.services.telegram_service import TelegramService
 
 logger = get_logger(__name__)
 
 
+
 class SessionService:
     """Service for managing temporary authentication sessions."""
 
-    def __init__(self, telegram_service: TelegramService):
+    def __init__(self, telegram_service: TelegramService, db: Optional[AsyncSession] = None):
         """
         Initialize session service.
 
         Args:
             telegram_service: TelegramService instance
+            db: Optional database session for persistent session storage
         """
         self._telegram_service = telegram_service
         self._temp_sessions: dict[str, dict] = {}
         self._cleanup_task: Optional[asyncio.Task] = None
+        self._db = db
+
+    def set_db(self, db: AsyncSession) -> None:
+        """Set database session for persistent session operations."""
+        self._db = db
+
+    def _get_session_repo(self) -> Optional[SessionRepository]:
+        """Get SessionRepository if database is available."""
+        if self._db:
+            return SessionRepository(self._db)
+        return None
+
+    async def create_or_update_db_session(
+        self,
+        user_id: int,
+        phone_number: str,
+        api_id: int,
+        api_hash: str
+    ) -> None:
+        """
+        Create or update a session record in the database to persist API credentials.
+
+        Args:
+            user_id: User ID
+            phone_number: Phone number
+            api_id: Telegram API ID
+            api_hash: Telegram API Hash
+        """
+        session_repo = self._get_session_repo()
+        if not session_repo:
+            logger.warning("No database session available, cannot persist session credentials")
+            return
+
+        try:
+            # Check if session already exists
+            existing_session = await session_repo.get_by_phone(phone_number)
+            
+            if existing_session:
+                # Update existing session with new credentials if they changed
+                if existing_session.api_id != str(api_id) or existing_session.api_hash != api_hash:
+                    existing_session.api_id = str(api_id)
+                    existing_session.api_hash = api_hash
+                    existing_session.is_active = True
+                    await session_repo.update_last_used(existing_session)
+                    logger.info(f"Updated session credentials in database for {phone_number}")
+                else:
+                    await session_repo.update_last_used(existing_session)
+                    logger.debug(f"Updated session activity for {phone_number}")
+            else:
+                # Create new session record
+                session_name = self._telegram_service._get_session_name(phone_number, api_id, api_hash)
+                session_path = self._telegram_service._get_session_path(session_name)
+                await session_repo.create(
+                    user_id=user_id,
+                    phone_number=phone_number,
+                    session_file_path=str(session_path),
+                    api_id=str(api_id),
+                    api_hash=api_hash
+                )
+                logger.info(f"Created session record in database for {phone_number}")
+        except Exception as e:
+            logger.error(f"Error creating/updating session in database: {e}", exc_info=True)
+            raise
 
     def _start_cleanup_task(self) -> None:
         """Start background task to clean up expired sessions."""

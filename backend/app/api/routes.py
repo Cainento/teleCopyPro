@@ -6,8 +6,9 @@ from typing import Optional
 import stripe
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Header
 from fastapi.responses import HTMLResponse, JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.connection import AsyncSessionLocal
+from app.database.connection import AsyncSessionLocal, get_db
 from app.api.dependencies import (
     get_copy_service,
     get_current_user,
@@ -116,6 +117,12 @@ async def send_code(
         except (ValueError, TypeError):
             raise TeleCopyException(f"API ID inválido: deve ser um número inteiro.", 400)
 
+        # Remove existing temporary session if any to avoid database locks
+        existing_temp = await session_service.get_temp_session(phone_number)
+        if existing_temp:
+            logger.info(f"Removing existing temporary session for {phone_number} before new send_code")
+            await session_service.remove_temp_session(phone_number)
+
         # Send verification code
         client, phone_code_hash = await telegram_service.send_verification_code(
             phone_number, api_id, api_hash
@@ -193,8 +200,18 @@ async def sign_in(
             display_name = user_info.get("username") or user_info.get("first_name")
             user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
-            # Note: Session activity will be tracked on the next authenticated request
-            # to avoid database transaction conflicts during login
+            # Create/update session in database to persist API credentials
+            try:
+                await session_service.create_or_update_db_session(
+                    user_id=user.id,
+                    phone_number=phone_number,
+                    api_id=api_id,
+                    api_hash=api_hash
+                )
+                logger.info(f"Session credentials saved to database for {phone_number}")
+            except Exception as db_err:
+                logger.error(f"Failed to save session to database: {db_err}", exc_info=True)
+                # Don't fail login if database save fails
 
             # Create JWT token
             access_token = create_access_token(
@@ -284,8 +301,18 @@ async def sign_in_2fa(
         display_name = user_info.get("username") or user_info.get("first_name")
         user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
-        # Note: Session activity will be tracked on the next authenticated request
-        # to avoid database transaction conflicts during login
+        # Create/update session in database to persist API credentials
+        try:
+            await session_service.create_or_update_db_session(
+                user_id=user.id,
+                phone_number=phone_number,
+                api_id=api_id,
+                api_hash=api_hash
+            )
+            logger.info(f"Session credentials saved to database for {phone_number}")
+        except Exception as db_err:
+            logger.error(f"Failed to save session to database: {db_err}", exc_info=True)
+            # Don't fail login if database save fails
 
         # Create JWT token
         access_token = create_access_token(
@@ -317,6 +344,7 @@ async def get_status(
     api_hash: Optional[str] = None,
     current_user: PydanticUser = Depends(get_current_user),
     telegram_service: TelegramService = Depends(get_telegram_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Check Telegram session status for authenticated user.
@@ -329,6 +357,9 @@ async def get_status(
         JSON with connection status
     """
     try:
+        # Set database session for credentials lookup
+        telegram_service.set_db(db)
+        
         # Use phone number from authenticated user
         phone_number = current_user.phone_number
         session = await telegram_service.check_session_status(phone_number, api_id, api_hash)

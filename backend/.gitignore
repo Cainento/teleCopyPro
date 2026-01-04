@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Common IDEs
+.vscode/
+.idea/
+
+# Application Specific
+logs/
+sessions/
+*.db
+*.sqlite3
+*.session
+
+# System
+.DS_Store
+Thumbs.db

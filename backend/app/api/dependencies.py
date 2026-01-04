@@ -40,16 +40,21 @@ def get_telegram_service() -> TelegramService:
     return _telegram_service
 
 
-def get_session_service() -> SessionService:
+def get_session_service(db: AsyncSession = Depends(get_db)) -> SessionService:
     """
-    Get or create SessionService instance.
+    Get or create SessionService instance with database session.
+
+    Args:
+        db: Database session for persistent session storage
 
     Returns:
-        SessionService instance
+        SessionService instance with database session set
     """
     global _session_service
     if _session_service is None:
         _session_service = SessionService(get_telegram_service())
+    # Set the database session for this request
+    _session_service.set_db(db)
     return _session_service
 
 
