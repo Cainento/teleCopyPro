@@ -18,15 +18,23 @@ const formatLocalTime = (timestamp: string) => {
 interface JobDetailsProps {
   job: Job;
   onStop?: (jobId: string) => void;
+  onPause?: (jobId: string) => void;
+  onResume?: (jobId: string) => void;
   onRefresh?: () => void;
   isStoppingJob?: boolean;
+  isPausingJob?: boolean;
+  isResumingJob?: boolean;
 }
 
 export function JobDetails({
   job,
   onStop,
+  onPause,
+  onResume,
   onRefresh,
   isStoppingJob,
+  isPausingJob,
+  isResumingJob,
 }: JobDetailsProps) {
   const navigate = useNavigate();
 
@@ -56,6 +64,11 @@ export function JobDetails({
       color: 'text-warning',
       bgColor: 'bg-warning/10',
     },
+    paused: {
+      label: 'Pausado',
+      color: 'text-warning',
+      bgColor: 'bg-warning/10',
+    },
   };
 
   const config = statusConfig[job.status];
@@ -81,8 +94,12 @@ export function JobDetails({
         <JobControls
           job={job}
           onStop={onStop}
+          onPause={onPause}
+          onResume={onResume}
           onRefresh={onRefresh}
           isStoppingJob={isStoppingJob}
+          isPausingJob={isPausingJob}
+          isResumingJob={isResumingJob}
         />
       </div>
 

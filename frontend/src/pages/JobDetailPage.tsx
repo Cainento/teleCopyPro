@@ -9,7 +9,15 @@ import { useEffect } from 'react';
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
-  const { useJob, stopJob, isStoppingJob } = useJobs();
+  const {
+    useJob,
+    stopJob,
+    pauseJob,
+    resumeJob,
+    isStoppingJob,
+    isPausingJob,
+    isResumingJob
+  } = useJobs();
 
   const { data: job, isLoading, error, refetch } = useJob(jobId || '');
 
@@ -56,8 +64,12 @@ export function JobDetailPage() {
               <JobDetails
                 job={job}
                 onStop={stopJob}
+                onPause={pauseJob}
+                onResume={resumeJob}
                 onRefresh={refetch}
                 isStoppingJob={isStoppingJob}
+                isPausingJob={isPausingJob}
+                isResumingJob={isResumingJob}
               />
             ) : null}
           </div>
