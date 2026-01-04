@@ -278,15 +278,26 @@ class CopyService:
             failed = 0
             total_messages = 0
 
+            # If resuming, initialize counters from DB
+            if job_id and db_job:
+                count = db_job.copied_messages
+                failed = db_job.failed_messages
+                logger.info(f"Resuming job {job_id} from offset: {count + failed} (copied: {count}, failed: {failed})")
+
             # Count total messages first (optional, for progress)
             try:
+                # Note: Counting doesn't support offset efficiently, so we just add our current offset to what we find remaining?
+                # Or re-count all? Re-counting all is safer for total_messages accuracy.
                 async for _ in client.iter_messages(source_entity, reverse=True):
                     total_messages += 1
             except Exception:
                 pass  # If counting fails, we'll still copy
+            
+            # Calculate offset for resume
+            offset_count = count + failed
 
             # Copy messages
-            async for message in client.iter_messages(source_entity, reverse=True):
+            async for message in client.iter_messages(source_entity, reverse=True, offset=offset_count):
                 try:
                     if copy_media or not message.media:
                         await client.send_message(target_entity, message)

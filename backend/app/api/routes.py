@@ -746,11 +746,14 @@ async def pause_copy(
 @router.post("/copy/{job_id}/resume")
 async def resume_copy(
     job_id: str,
+    background_tasks: BackgroundTasks,
     current_user: PydanticUser = Depends(get_current_user),
     copy_service: CopyService = Depends(get_copy_service),
+    telegram_service: TelegramService = Depends(get_telegram_service),
 ):
     """
-    Resume a paused real-time copy job for authenticated user.
+    Resume a paused copy job for authenticated user.
+    Handles both real-time and historical jobs.
 
     Path parameters:
         - job_id: str
@@ -766,14 +769,56 @@ async def resume_copy(
         if job.phone_number != current_user.phone_number:
             raise TeleCopyException("Acesso negado a este job.", 403)
 
-        logger.info(f"Resuming job {job_id}")
-        job = await copy_service.resume_real_time_copy(job_id)
-        logger.info(f"Job {job_id} resumed successfully")
+        logger.info(f"Resuming job {job_id} (Mode: {job.mode})")
+
+        if job.mode == "historical":
+            # For historical jobs, we need to restart the background task
+            # First, update status to running to ensure the loop runs
+            # Note: We need to do this manually or via a service method that updates DB but starts nothing
+            # Since we don't have a 'resume_historical_status' method, we can specific update status
+            
+            # Create a new local session for the background task
+            async def copy_task():
+                async with AsyncSessionLocal() as session:
+                    try:
+                        # Instantiate a new CopyService with the fresh session
+                        background_copy_service = CopyService(telegram_service, session)
+                        # Call copy_messages_historical with the job_id - it will now auto-resume from DB offset
+                        if job.source_channel and job.target_channel:
+                            await background_copy_service.copy_messages_historical(
+                                phone_number=job.phone_number,
+                                source_channel=job.source_channel,
+                                target_channel=job.target_channel,
+                                copy_media=job.copy_media,
+                                job_id=job.id
+                                # api_id/hash will be fetched from DB by the improved service
+                            )
+                        else:
+                             logger.error(f"Cannot resume job {job_id}: missing channel info")
+                    except Exception as e:
+                        logger.error(f"Background resume copy task failed: {e}", exc_info=True)
+
+            # Update status to running immediately so UI updates
+            # (The background task would eventually do it but better to have immediate feedback if possible)
+            # Actually, copy_messages_historical updates to "running" at start.
+            
+            background_tasks.add_task(copy_task)
+            
+            # Can't easily return the updated job immediately since it runs in background,
+            # but we can return the 'active' status expectation
+            status = "running"
+            
+        else:
+            # Real-time job
+            job = await copy_service.resume_real_time_copy(job_id)
+            status = job.status
+
+        logger.info(f"Job {job_id} resume process initiated successfully")
         return JSONResponse(
             content={
                 "message": f"Job {job_id} retomado com sucesso.",
-                "job_id": job.id,
-                "status": job.status
+                "job_id": job_id,
+                "status": status
             },
             status_code=200
         )
