@@ -1,0 +1,1 @@
+import{I as t}from"./index-CzFFDwW4.js";const d=t(s=>({status:"disconnected",userId:void 0,username:void 0,setStatus:e=>{s({status:e})},setUserInfo:(e,o)=>{s({userId:e,username:o})},clearSession:()=>{s({status:"disconnected",userId:void 0,username:void 0})}}));export{d as u};

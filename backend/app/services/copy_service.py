@@ -297,7 +297,13 @@ class CopyService:
             offset_count = count + failed
 
             # Copy messages
-            async for message in client.iter_messages(source_entity, reverse=True, offset=offset_count):
+            skipped_count = 0
+            async for message in client.iter_messages(source_entity, reverse=True):
+                # Manual offset handling since iter_messages doesn't support integer offset for skipping
+                if skipped_count < offset_count:
+                    skipped_count += 1
+                    continue
+
                 try:
                     if copy_media or not message.media:
                         await client.send_message(target_entity, message)

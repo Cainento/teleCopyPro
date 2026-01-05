@@ -1,22 +1,13 @@
 # Fly.io Configuration for Telegram Copier Backend
-# See: https://fly.io/docs/reference/configuration/
-
 app = "telegram-copier-backend"
-primary_region = "gru"  # São Paulo, Brazil
+primary_region = "gru"
 
 [build]
   dockerfile = "Dockerfile"
 
 [env]
-  PORT = "8000"
   ENVIRONMENT = "production"
   SESSION_FOLDER = "/data/sessions"
-  PAGBANK_ENVIRONMENT = "sandbox"
-  PAGBANK_PREMIUM_MONTHLY_PRICE = "5990"
-  PAGBANK_PREMIUM_ANNUAL_PRICE = "59900"
-  PAGBANK_ENTERPRISE_MONTHLY_PRICE = "9990"
-  PAGBANK_ENTERPRISE_ANNUAL_PRICE = "99900"
-  PAGBANK_ENABLE_HOMOLOGATION_LOGS = "true"
 
 [mounts]
   source = "telegram_sessions"
@@ -26,66 +17,11 @@ primary_region = "gru"  # São Paulo, Brazil
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = false
   auto_start_machines = true
-  min_machines_running = 0
-  processes = ["app"]
-
-  [http_service.concurrency]
-    type = "connections"
-    hard_limit = 25
-    soft_limit = 20
-
-  [[http_service.ports]]
-    port = 80
-    handlers = ["http"]
-    force_https = true
-
-  [[http_service.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [http_service.http_options]
-    response.headers."X-Frame-Options" = "DENY"
-    response.headers."X-Content-Type-Options" = "nosniff"
-    response.headers."X-XSS-Protection" = "1; mode=block"
-    response.headers."Referrer-Policy" = "strict-origin-when-cross-origin"
+  min_machines_running = 1
 
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256
-
-[[services]]
-  protocol = "tcp"
-  internal_port = 8000
-
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-    force_https = true
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [services.concurrency]
-    type = "connections"
-    hard_limit = 25
-    soft_limit = 20
-
-  [[services.tcp_checks]]
-    interval = "15s"
-    timeout = "2s"
-    grace_period = "5s"
-
-  [[services.http_checks]]
-    interval = "30s"
-    timeout = "10s"
-    grace_period = "10s"
-    method = "GET"
-    path = "/api/telegram/health"
-    protocol = "http"
-
-    [services.http_checks.headers]
-      User-Agent = "Fly-Health-Check"
+  memory_mb = 1024

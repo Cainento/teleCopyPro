@@ -2,221 +2,25 @@
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-*.egg
-*.egg-info/
-dist/
-build/
-eggs/
-.eggs/
-/lib/
-lib64/
-backend/lib/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.manifest
-*.spec
 
-# Virtual Environments
-env/
+# Virtual Environment
 venv/
-ENV/
-env.bak/
-venv.bak/
-.venv/
-
-# Python Testing
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
-.hypothesis/
-
-# Python Installers
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Node.js / Frontend
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-.pnpm-store/
-
-# Frontend Build
-dist/
-dist-ssr/
-build/
-.cache/
-.vite/
-.eslintcache
-
-# Environment Variables
+env/
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-.env.*.local
-*.env
+.env.*
+!.env.example
 
-# Environment templates (these should't be committed)
-.env.development
-.env.production
-.env.example
-
-# Telegram Sessions (IMPORTANT - contains auth tokens)
-*.session
-*.session-journal
-sessions/
-backend/sessions/
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-*.db-shm
-*.db-wal
-
-# Logs
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-pnpm-debug.log*
-backend/logs/
-
-# IDEs and Editors
+# Common IDEs
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
-*.bak
-.project
-.classpath
-.c9/
-*.launch
-.settings/
-*.sublime-workspace
-.history/
 
-# OS Files
+# Application Specific
+logs/
+sessions/
+*.db
+*.sqlite3
+*.session
+
+# System
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Windows reserved names
-nul
-NUL
-CON
-PRN
-AUX
-COM[1-9]
-LPT[1-9]
-
-# Docker
-.dockerignore
-docker-compose.override.yml
-
-# Coverage Reports
-coverage/
-*.cover
-.hypothesis/
-.pytest_cache/
-nosetests.xml
-coverage.xml
-*.coveragerc
-
-# MyPy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre
-.pyre/
-
-# PyCharm
-.idea/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# pyenv
-.python-version
-
-# Backup files
-*~
-*.orig
-*.rej
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# Package manager lock files (optional - remove if you want to commit them)
-# package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
-
-# TypeScript
-*.tsbuildinfo
-
-# Production config files (optional)
-.vercel
-.netlify
-
-# Sentry
-.sentryclirc
-
-# Documentation (ignore all markdown files)
-*.md
-!README.md
-!backend/README.md
-!frontend/README.md
-!PHASE_2_SUMMARY.md
-!SETUP.md
-!DEPLOYMENT_GUIDE.md
-!DATABASE_SETUP.md
-!STRIPE_ENVIRONMENT_SWITCHING.md
-!STRIPE_QUICK_REFERENCE.md
-!WEBHOOK_QUICK_START.md
-frontend/.env.production
-!claude.md

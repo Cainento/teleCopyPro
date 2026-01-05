@@ -1,0 +1,18 @@
+.env*
+__pycache__/
+*.db
+logs/
+sessions/
+# Database migrations must be included
+# alembic.ini
+Dockerfile
+docker-compose.yml
+fly.toml
+clear_stripe_customer.py
+simple_webhook_test.py
+test_webhook.py
+use-dev.*
+use-prod.*
+# Ignore git
+.git/
+.gitignore

@@ -48,9 +48,9 @@ def upgrade() -> None:
     op.create_index(op.f('ix_pix_payments_status'), 'pix_payments', ['status'], unique=False)
     op.create_index(op.f('ix_pix_payments_user_id'), 'pix_payments', ['user_id'], unique=False)
     
-    # Safe drop for existing tables if they exist
-    op.execute('DROP TABLE IF EXISTS pix_charges CASCADE')
-    op.execute('DROP TABLE IF EXISTS pix_transactions CASCADE')
+    # Safe drop for existing tables if they exist (no CASCADE for SQLite compatibility)
+    op.execute('DROP TABLE IF EXISTS pix_charges')
+    op.execute('DROP TABLE IF EXISTS pix_transactions')
     
     op.add_column('users', sa.Column('tax_id', sa.String(length=14), nullable=True))
     # ### end Alembic commands ###

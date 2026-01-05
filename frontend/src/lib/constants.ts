@@ -7,7 +7,7 @@ export const API_BASE_URL = import.meta.env.MODE === 'production'
 
 // Direct backend URL (bypasses Vercel proxy for specific endpoints like logout)
 export const BACKEND_URL = import.meta.env.MODE === 'production'
-  ? 'https://telegram-copier-backend.fly.dev'
+  ? (import.meta.env.VITE_BACKEND_URL || 'https://telegram-copier-backend.fly.dev')
   : (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000');
 
 // Polling intervals (in milliseconds) - Optimized for performance

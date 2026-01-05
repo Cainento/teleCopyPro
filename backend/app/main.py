@@ -13,7 +13,6 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.api.routes import router, user_router, stripe_router, pagbank_router, webhook_router, admin_router
-from app.api.admin_homologation import router as admin_homologation_router
 from app.config import settings
 from app.core.exception_handler import (
     global_exception_handler,
@@ -139,7 +138,6 @@ app.include_router(stripe_router)
 app.include_router(pagbank_router)
 app.include_router(webhook_router)
 app.include_router(admin_router)
-app.include_router(admin_homologation_router)
 
 # Serve frontend static files
 frontend_path = Path(__file__).parent.parent.parent / "frontend" / "src"

@@ -66,7 +66,7 @@ def setup_logger(name: Optional[str] = None) -> logging.Logger:
     logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
     logging.getLogger("telethon").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    # logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
     return logger
 

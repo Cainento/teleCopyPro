@@ -769,10 +769,10 @@ async def resume_copy(
         if job.phone_number != current_user.phone_number:
             raise TeleCopyException("Acesso negado a este job.", 403)
 
-        logger.info(f"Resuming job {job_id} (Mode: {job.mode})")
+        logger.info(f"Resuming job {job_id} (Real-time: {job.real_time})")
 
-        if job.mode == "historical":
-            # For historical jobs, we need to restart the background task
+        if not job.real_time:
+            # For historical jobs (real_time=False), we need to restart the background task
             # First, update status to running to ensure the loop runs
             # Note: We need to do this manually or via a service method that updates DB but starts nothing
             # Since we don't have a 'resume_historical_status' method, we can specific update status
