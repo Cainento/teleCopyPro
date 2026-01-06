@@ -83,17 +83,10 @@ async def send_code(
     request: Request,
     telegram_service: TelegramService = Depends(get_telegram_service),
     session_service: SessionService = Depends(get_session_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Send verification code to phone number.
-
-    Request body:
-        - phone_number: str
-        - api_id: int
-        - api_hash: str
-
-    Returns:
-        JSON with message and phone_code_hash
     """
     try:
         data = await request.json()
@@ -125,7 +118,7 @@ async def send_code(
 
         # Send verification code
         client, phone_code_hash = await telegram_service.send_verification_code(
-            phone_number, api_id, api_hash
+            phone_number, api_id, api_hash, db
         )
 
         # Create temporary session
@@ -155,16 +148,10 @@ async def sign_in(
     telegram_service: TelegramService = Depends(get_telegram_service),
     session_service: SessionService = Depends(get_session_service),
     user_service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Verify phone code and complete authentication.
-
-    Request body:
-        - phone_number: str
-        - phone_code: str
-
-    Returns:
-        JSON with success message and user info
     """
     try:
         data = await request.json()
@@ -194,7 +181,7 @@ async def sign_in(
             )
 
             # Remove temporary session (login successful)
-            await session_service.remove_temp_session(phone_number)
+            await session_service.remove_temp_session(phone_number, disconnect=False)
 
             # Get or create user in database
             display_name = user_info.get("username") or user_info.get("first_name")
@@ -206,12 +193,16 @@ async def sign_in(
                     user_id=user.id,
                     phone_number=phone_number,
                     api_id=api_id,
-                    api_hash=api_hash
+                    api_hash=api_hash,
+                    db=db
                 )
                 logger.info(f"Session credentials saved to database for {phone_number}")
             except Exception as db_err:
                 logger.error(f"Failed to save session to database: {db_err}", exc_info=True)
-                # Don't fail login if database save fails
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
 
             # Create JWT token
             access_token = create_access_token(
@@ -260,16 +251,10 @@ async def sign_in_2fa(
     telegram_service: TelegramService = Depends(get_telegram_service),
     session_service: SessionService = Depends(get_session_service),
     user_service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Verify 2FA password.
-
-    Request body:
-        - phone_number: str
-        - password: str
-
-    Returns:
-        JSON with success message and user info
     """
     try:
         data = await request.json()
@@ -295,7 +280,7 @@ async def sign_in_2fa(
         user_info = await telegram_service.verify_2fa_password(client, password, phone_number)
 
         # Remove temporary session
-        await session_service.remove_temp_session(phone_number)
+        await session_service.remove_temp_session(phone_number, disconnect=False)
 
         # Get or create user in database
         display_name = user_info.get("username") or user_info.get("first_name")
@@ -307,12 +292,16 @@ async def sign_in_2fa(
                 user_id=user.id,
                 phone_number=phone_number,
                 api_id=api_id,
-                api_hash=api_hash
+                api_hash=api_hash,
+                db=db
             )
             logger.info(f"Session credentials saved to database for {phone_number}")
         except Exception as db_err:
             logger.error(f"Failed to save session to database: {db_err}", exc_info=True)
-            # Don't fail login if database save fails
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
         # Create JWT token
         access_token = create_access_token(
@@ -348,21 +337,11 @@ async def get_status(
 ):
     """
     Check Telegram session status for authenticated user.
-
-    Query parameters:
-        - api_id: int (optional)
-        - api_hash: str (optional)
-
-    Returns:
-        JSON with connection status
     """
     try:
-        # Set database session for credentials lookup
-        telegram_service.set_db(db)
-        
         # Use phone number from authenticated user
         phone_number = current_user.phone_number
-        session = await telegram_service.check_session_status(phone_number, api_id, api_hash)
+        session = await telegram_service.check_session_status(phone_number, db, api_id, api_hash)
 
         return JSONResponse(
             content=SessionResponse(
@@ -384,16 +363,10 @@ async def logout(
     request: Request,
     current_user: PydanticUser = Depends(get_current_user),
     telegram_service: TelegramService = Depends(get_telegram_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Logout user by disconnecting Telegram session and deleting session file.
-
-    Query parameters (optional):
-        - api_id: int
-        - api_hash: str
-
-    Returns:
-        JSON with success message
     """
     try:
         data = await request.json() if request.headers.get("content-length") else {}
@@ -402,7 +375,7 @@ async def logout(
         api_hash = data.get("api_hash")
 
         # Logout (disconnect and delete session)
-        await telegram_service.logout(phone_number, api_id, api_hash)
+        await telegram_service.logout(phone_number, db, api_id, api_hash)
 
         return JSONResponse(
             content={
@@ -424,18 +397,10 @@ async def copy_channel(
     telegram_service: TelegramService = Depends(get_telegram_service),
     copy_service: CopyService = Depends(get_copy_service),
     user_service: UserService = Depends(get_user_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Copy messages from source channel to target channel.
-
-    Request body:
-        - source_channel: str
-        - target_channel: str
-        - real_time: bool (optional, default: False)
-        - copy_media: bool (optional, default: True)
-
-    Returns:
-        JSON with job information
     """
     try:
         data = await request.json()
@@ -458,7 +423,7 @@ async def copy_channel(
         
         # Check if session exists and is authorized
         session = await telegram_service.check_session_status(
-            phone_number, api_id, api_hash
+            phone_number, db, api_id, api_hash
         )
         if not session.is_authorized:
             raise TeleCopyException(

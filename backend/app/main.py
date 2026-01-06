@@ -49,6 +49,8 @@ async def lifespan(app: FastAPI):
 
     # Start plan expiry scheduler (checks for expired PIX payment plans hourly)
     try:
+        from app.api.dependencies import get_telegram_service
+        plan_expiry_scheduler.telegram_service = get_telegram_service()
         await plan_expiry_scheduler.start()
     except Exception as e:
         logger.error(f"Error starting plan expiry scheduler: {e}", exc_info=True)

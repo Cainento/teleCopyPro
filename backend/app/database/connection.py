@@ -11,6 +11,9 @@ from app.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
 # Create async engine
 # NullPool is used in production for better connection management with asyncpg
 # When using NullPool, pool_size and max_overflow parameters should NOT be passed
@@ -21,7 +24,24 @@ connect_args = {}
 if "postgresql" in settings.database_url or "postgres" in settings.database_url:
     # PostgreSQL-specific: Disable SSL for Fly.io internal network or local development
     connect_args = {"ssl": False}
-# SQLite doesn't need any connect_args
+elif "sqlite" in settings.database_url:
+    # SQLite-specific: Increase busy timeout (in seconds)
+    connect_args = {"timeout": 60}
+
+# Optimization for SQLite: Use WAL (Write-Ahead Logging) mode for better concurrency
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enable WAL mode for SQLite to allow concurrent reads and one writer."""
+    # We check if the connection object has an 'execute' method (pysqlite/aiosqlite)
+    # Note: For async engines, we might need a different approach or this might work via the sync wrapper
+    try:
+        if "sqlite" in settings.database_url:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+    except Exception as e:
+        logger.warning(f"Failed to set SQLite PRAGMAs: {e}")
 
 if settings.is_production:
     engine = create_async_engine(

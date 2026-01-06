@@ -11,6 +11,10 @@ from app.core.logger import get_logger
 from app.database.models import User as DBUser, CopyJob as DBCopyJob, TelegramSession
 from app.models.user import User as PydanticUser, UserPlan, UserUpdate
 from app.services.user_service import UserService
+from app.services.telegram_service import TelegramService
+from app.services.copy_service import CopyService
+from app.database.repositories.job_repository import JobRepository
+
 
 logger = get_logger(__name__)
 
@@ -18,15 +22,17 @@ logger = get_logger(__name__)
 class AdminService:
     """Service for admin dashboard and user management."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, telegram_service: Optional[TelegramService] = None):
         """
         Initialize admin service.
 
         Args:
             db: SQLAlchemy async session
+            telegram_service: Optional TelegramService for managing jobs
         """
         self.db = db
-        self.user_service = UserService(db)
+        self.user_service = UserService(db, telegram_service)
+        self.telegram_service = telegram_service
 
     async def get_dashboard_stats(self) -> Dict[str, Any]:
         """
@@ -231,6 +237,28 @@ class AdminService:
         
         if plan == UserPlan.FREE:
             db_user.plan_expiry = None
+            
+            # Stop limits-breaking jobs (real-time jobs)
+            if self.telegram_service:
+                try:
+                    # Initialize services
+                    copy_service = CopyService(self.telegram_service, self.db)
+                    job_repo = JobRepository(self.db)
+
+                    # Find active real-time jobs
+                    real_time_jobs = await job_repo.get_real_time_jobs_by_user(db_user.id)
+                    
+                    for job in real_time_jobs:
+                        logger.info(
+                            f"Stopping real-time job {job.job_id} for user {user_id_or_phone} "
+                            f"due to admin downgrade to FREE"
+                        )
+                        # Stop the job
+                        await copy_service.stop_real_time_copy(job.job_id)
+                        
+                except Exception as e:
+                    logger.error(f"Error stopping real-time jobs for user {user_id_or_phone}: {e}", exc_info=True)
+
         elif days:
             db_user.plan_expiry = datetime.utcnow() + timedelta(days=days)
         

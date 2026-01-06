@@ -11,6 +11,10 @@ from app.core.logger import get_logger
 from app.database.repositories.user_repository import UserRepository
 from app.models.user import User as PydanticUser, UserCreate, UserPlan, UserUpdate
 from app.database.models import User as DBUser
+from app.services.telegram_service import TelegramService
+from app.services.copy_service import CopyService
+from app.database.repositories.job_repository import JobRepository
+
 
 logger = get_logger(__name__)
 
@@ -18,15 +22,17 @@ logger = get_logger(__name__)
 class UserService:
     """Service for user management, plan validation, and usage tracking."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, telegram_service: Optional[TelegramService] = None):
         """
         Initialize user service with database session.
 
         Args:
             db: SQLAlchemy async session
+            telegram_service: Optional TelegramService for managing jobs
         """
         self.db = db
         self.user_repo = UserRepository(db)
+        self.telegram_service = telegram_service
 
     def _hash_password(self, password: str) -> str:
         """
@@ -333,6 +339,27 @@ class UserService:
 
         pydantic_user = self._db_to_pydantic(db_user)
         if self.is_plan_expired(pydantic_user):
+            # Stop limits-breaking jobs (real-time jobs)
+            if self.telegram_service:
+                try:
+                    # Initialize services
+                    copy_service = CopyService(self.telegram_service, self.db)
+                    job_repo = JobRepository(self.db)
+
+                    # Find active real-time jobs
+                    real_time_jobs = await job_repo.get_real_time_jobs_by_user(db_user.id)
+                    
+                    for job in real_time_jobs:
+                        logger.info(
+                            f"Stopping real-time job {job.job_id} for user {email} "
+                            f"due to plan expiry (downgrade to FREE)"
+                        )
+                        # Stop the job
+                        await copy_service.stop_real_time_copy(job.job_id)
+                        
+                except Exception as e:
+                    logger.error(f"Error stopping real-time jobs for user {email}: {e}", exc_info=True)
+
             updated_user = await self.user_repo.update_plan(
                 db_user,
                 plan=UserPlan.FREE,
@@ -361,6 +388,27 @@ class UserService:
 
         pydantic_user = self._db_to_pydantic(db_user)
         if self.is_plan_expired(pydantic_user):
+            # Stop limits-breaking jobs (real-time jobs)
+            if self.telegram_service:
+                try:
+                    # Initialize services
+                    copy_service = CopyService(self.telegram_service, self.db)
+                    job_repo = JobRepository(self.db)
+
+                    # Find active real-time jobs
+                    real_time_jobs = await job_repo.get_real_time_jobs_by_user(db_user.id)
+                    
+                    for job in real_time_jobs:
+                        logger.info(
+                            f"Stopping real-time job {job.job_id} for user {phone_number} "
+                            f"due to plan expiry (downgrade to FREE)"
+                        )
+                        # Stop the job
+                        await copy_service.stop_real_time_copy(job.job_id)
+                        
+                except Exception as e:
+                    logger.error(f"Error stopping real-time jobs for user {phone_number}: {e}", exc_info=True)
+
             updated_user = await self.user_repo.update_plan(
                 db_user,
                 plan=UserPlan.FREE,

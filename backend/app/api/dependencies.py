@@ -41,21 +41,19 @@ def get_telegram_service() -> TelegramService:
     return _telegram_service
 
 
-def get_session_service(db: AsyncSession = Depends(get_db)) -> SessionService:
+def get_session_service(telegram_service: TelegramService = Depends(get_telegram_service)) -> SessionService:
     """
-    Get or create SessionService instance with database session.
+    Get or create SessionService instance.
 
     Args:
-        db: Database session for persistent session storage
+        telegram_service: TelegramService instance
 
     Returns:
-        SessionService instance with database session set
+        SessionService instance
     """
     global _session_service
     if _session_service is None:
-        _session_service = SessionService(get_telegram_service())
-    # Set the database session for this request
-    _session_service.set_db(db)
+        _session_service = SessionService(telegram_service)
     return _session_service
 
 
@@ -76,30 +74,38 @@ def get_copy_service(
     return CopyService(telegram_service, db)
 
 
-def get_user_service(db: AsyncSession = Depends(get_db)) -> UserService:
+def get_user_service(
+    db: AsyncSession = Depends(get_db),
+    telegram_service: TelegramService = Depends(get_telegram_service)
+) -> UserService:
     """
     Get UserService instance with database session.
 
     Args:
         db: Database session
+        telegram_service: TelegramService instance
 
     Returns:
         UserService instance
     """
-    return UserService(db)
+    return UserService(db, telegram_service)
 
 
-def get_stripe_service(db: AsyncSession = Depends(get_db)) -> StripeService:
+def get_stripe_service(
+    db: AsyncSession = Depends(get_db),
+    telegram_service: TelegramService = Depends(get_telegram_service)
+) -> StripeService:
     """
     Get StripeService instance with database session.
 
     Args:
         db: Database session
+        telegram_service: TelegramService instance
 
     Returns:
         StripeService instance
     """
-    return StripeService(db)
+    return StripeService(db, telegram_service)
 
 
 def get_pagbank_service(db: AsyncSession = Depends(get_db)) -> PagBankService:
@@ -115,17 +121,21 @@ def get_pagbank_service(db: AsyncSession = Depends(get_db)) -> PagBankService:
     return PagBankService(db)
 
 
-def get_admin_service(db: AsyncSession = Depends(get_db)) -> AdminService:
+def get_admin_service(
+    db: AsyncSession = Depends(get_db),
+    telegram_service: TelegramService = Depends(get_telegram_service)
+) -> AdminService:
     """
     Get AdminService instance with database session.
 
     Args:
         db: Database session
+        telegram_service: TelegramService instance
 
     Returns:
         AdminService instance
     """
-    return AdminService(db)
+    return AdminService(db, telegram_service)
 
 
 async def get_current_user(
@@ -202,23 +212,30 @@ async def get_current_user(
             session_repo = SessionRepository(db)
             db_session = await session_repo.get_by_phone(phone_number)
             if db_session:
-                # Update session activity only if > 5 minutes passed to avoid database locking
-                should_update = True
+                # Update session activity only if > 1 hour passed and add random jitter to avoid clashing writes
+                import random
+                should_update = False
                 if db_session.last_used_at:
                     time_diff = datetime.utcnow() - db_session.last_used_at
-                    if time_diff.total_seconds() < 300:  # 5 minutes
-                        should_update = False
+                    # 3600s (1h) + random jitter (0-600s)
+                    if time_diff.total_seconds() > (3600 + random.randint(0, 600)):
+                        should_update = True
+                else:
+                    should_update = True
                 
                 if should_update:
                     await session_repo.update_last_used(db_session)
                     logger.debug(f"Updated session activity for {phone_number}")
         except Exception as e:
-            logger.error(f"Error updating session activity: {e}", exc_info=True)
-            # Rollback session to prevent poisoning subsequent operations in this request
+            logger.warning(f"Non-critical error updating session activity for {phone_number}: {e}")
+            # IMPORTANT: Rollback the session so that this failure doesn't "poison" the main request's transaction
+            # SQLite locks can cause this, but we don't want to fail the user's request just because
+            # we couldn't update the "last seen" timestamp.
             try:
                 await db.rollback()
-            except Exception:
-                pass
+                logger.debug(f"Successfully rolled back session after activity update failure")
+            except Exception as rb_e:
+                logger.error(f"Failed to rollback session: {rb_e}")
             # Don't fail authentication if activity update fails
 
         # Check and auto-downgrade expired plans (PIX payments have expiry dates)

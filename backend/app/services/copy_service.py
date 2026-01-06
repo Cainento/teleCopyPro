@@ -33,8 +33,6 @@ class CopyService:
         self.db = db
         self.job_repo = JobRepository(db)
         self.user_repo = UserRepository(db)
-        self.job_repo = JobRepository(db)
-        self.user_repo = UserRepository(db)
 
     def _db_to_pydantic(self, db_job) -> PydanticCopyJob:
         """Convert database job to Pydantic model."""
@@ -98,8 +96,6 @@ class CopyService:
                 # If all else fails, raise a helpful error
                 logger.error(f"Could not resolve entity {entity_id}")
                 raise CopyServiceError(f"Não foi possível encontrar o canal/grupo {entity_id}. Verifique se:\n1. Você é membro do canal/grupo\n2. O ID está correto\n3. Se for público, tente usar o @username")
-
-
 
     async def create_historical_job(
         self,
@@ -227,7 +223,8 @@ class CopyService:
                 client = await self._telegram_service.get_or_create_client(
                     phone_number=phone_number,
                     api_id=api_id,
-                    api_hash=api_hash
+                    api_hash=api_hash,
+                    db=self.db
                 )
 
             if not await client.is_user_authorized():
@@ -441,15 +438,14 @@ class CopyService:
                 client = await self._telegram_service.get_or_create_client(
                     phone_number=phone_number,
                     api_id=api_id,
-                    api_hash=api_hash
+                    api_hash=api_hash,
+                    db=self.db
                 )
 
             if not await client.is_user_authorized():
                 raise SessionError("Session não autorizada. Por favor, refaça o login.")
 
             # Get entities
-            # Get entities
-            # Try to convert channel IDs to proper format
             source_id = source_channel
             try:
                 source_id = int(source_channel)
@@ -509,10 +505,6 @@ class CopyService:
                                  logger.warning(f"[Handler {job_id}] Job is {fresh_job.status}, removing handler and stopping processing.")
                                  try:
                                      client.remove_event_handler(message_handler)
-                                     # Also notify TelegramService to clear the reference
-                                     if hasattr(self, '_telegram_service'):
-                                         # Use a fire-and-forget task or just ignore ensuring consistency for now as the handler is dead
-                                         pass
                                  except Exception as remove_error:
                                      logger.error(f"[Handler {job_id}] Failed to remove self: {remove_error}")
                                  return
@@ -675,4 +667,3 @@ class CopyService:
 
         db_jobs = await self.job_repo.get_by_user(db_user.id)
         return [self._db_to_pydantic(job) for job in db_jobs]
-

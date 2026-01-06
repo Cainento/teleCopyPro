@@ -59,12 +59,12 @@ export function PlanCard({ currentPlan, limits, expiryDate, className }: PlanCar
     },
     {
       label: 'Suporte a Mídia',
-      value: 'Incluído',
+      value: limits.mediaSupport ? 'Incluído' : 'Não incluído',
       enabled: limits.mediaSupport,
     },
     {
       label: 'Suporte Prioritário',
-      value: 'Incluído',
+      value: limits.prioritySupport ? 'Incluído' : 'Não incluído',
       enabled: limits.prioritySupport,
     },
   ];

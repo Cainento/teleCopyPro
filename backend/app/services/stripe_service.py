@@ -12,6 +12,10 @@ from app.core.exceptions import TeleCopyException
 from app.database.models import User
 from app.database.repositories.user_repository import UserRepository
 from app.models.user import UserPlan
+from app.services.telegram_service import TelegramService
+from app.services.copy_service import CopyService
+from app.database.repositories.job_repository import JobRepository
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +23,11 @@ logger = logging.getLogger(__name__)
 class StripeService:
     """Service for managing Stripe operations."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, telegram_service: Optional[TelegramService] = None):
         """Initialize Stripe service with database session."""
         self.db = db
         self.user_repo = UserRepository(db)
+        self.telegram_service = telegram_service
 
         # Initialize Stripe API key
         if settings.stripe_secret_key:
@@ -114,29 +119,51 @@ class StripeService:
             # Ensure user has a Stripe customer
             customer_id = await self.create_customer(user)
 
-            # Create checkout session
-            checkout_session = stripe.checkout.Session.create(
-                customer=customer_id,
-                mode="subscription",
-                payment_method_types=["card"],
-                line_items=[{
+            # Prepare checkout session data
+            checkout_session_data = {
+                "mode": "subscription",
+                "payment_method_types": ["card"],
+                "line_items": [{
                     "price": price_id,
                     "quantity": 1,
                 }],
-                success_url=success_url,
-                cancel_url=cancel_url,
-                metadata={
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "metadata": {
                     "user_id": str(user.id),
                     "phone_number": user.phone_number or "",
                 },
-                allow_promotion_codes=True,
-                billing_address_collection="auto",
-                subscription_data={
+                "allow_promotion_codes": True,
+                "billing_address_collection": "auto",
+                "subscription_data": {
                     "metadata": {
                         "user_id": str(user.id),
                     }
                 }
-            )
+            }
+
+            try:
+                # Create checkout session
+                checkout_session = stripe.checkout.Session.create(
+                    customer=customer_id,
+                    **checkout_session_data
+                )
+            except stripe.error.InvalidRequestError as e:
+                # Check if error is due to missing customer
+                if "No such customer" in str(e):
+                    logger.warning(f"Stripe customer {customer_id} not found. Recreating customer for user {user.id}")
+                    
+                    # Reset customer ID and create new one
+                    user.stripe_customer_id = None
+                    customer_id = await self.create_customer(user)
+                    
+                    # Retry checkout session creation with new customer
+                    checkout_session = stripe.checkout.Session.create(
+                        customer=customer_id,
+                        **checkout_session_data
+                    )
+                else:
+                    raise e
 
             logger.info(f"Created Stripe checkout session {checkout_session.id} for user {user.id}")
             return checkout_session.url
@@ -278,6 +305,28 @@ class StripeService:
             if subscription.status in ["canceled", "incomplete_expired", "unpaid"]:
                 user.plan = UserPlan.FREE
                 user.plan_expiry = None
+                
+                # Stop limits-breaking jobs (real-time jobs)
+                if self.telegram_service:
+                    try:
+                        # Initialize services
+                        copy_service = CopyService(self.telegram_service, self.db)
+                        job_repo = JobRepository(self.db)
+
+                        # Find active real-time jobs
+                        real_time_jobs = await job_repo.get_real_time_jobs_by_user(user.id)
+                        
+                        for job in real_time_jobs:
+                            logger.info(
+                                f"Stopping real-time job {job.job_id} for user {user.id} "
+                                f"due to Stripe subscription status: {subscription.status} (downgrade to FREE)"
+                            )
+                            # Stop the job
+                            await copy_service.stop_real_time_copy(job.job_id)
+                            
+                    except Exception as e:
+                        logger.error(f"Error stopping real-time jobs for user {user.id}: {e}", exc_info=True)
+
             elif subscription.status == "active":
                 # Set plan expiry to subscription period end
                 user.plan_expiry = user.subscription_period_end
@@ -375,6 +424,28 @@ class StripeService:
             user.subscription_status = "canceled"
             user.plan_expiry = None
             user.subscription_period_end = None
+            
+            # Stop limits-breaking jobs (real-time jobs)
+            if self.telegram_service:
+                try:
+                    # Initialize services
+                    copy_service = CopyService(self.telegram_service, self.db)
+                    job_repo = JobRepository(self.db)
+
+                    # Find active real-time jobs
+                    real_time_jobs = await job_repo.get_real_time_jobs_by_user(user.id)
+                    
+                    for job in real_time_jobs:
+                        logger.info(
+                            f"Stopping real-time job {job.job_id} for user {user.id} "
+                            f"due to Stripe subscription deletion (downgrade to FREE)"
+                        )
+                        # Stop the job
+                        await copy_service.stop_real_time_copy(job.job_id)
+                        
+                except Exception as e:
+                    logger.error(f"Error stopping real-time jobs for user {user.id}: {e}", exc_info=True)
+
 
             await self.user_repo.update(user)
 

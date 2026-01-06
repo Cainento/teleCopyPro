@@ -20,35 +20,28 @@ logger = get_logger(__name__)
 class SessionService:
     """Service for managing temporary authentication sessions."""
 
-    def __init__(self, telegram_service: TelegramService, db: Optional[AsyncSession] = None):
+    def __init__(self, telegram_service: TelegramService):
         """
         Initialize session service.
 
         Args:
             telegram_service: TelegramService instance
-            db: Optional database session for persistent session storage
         """
         self._telegram_service = telegram_service
         self._temp_sessions: dict[str, dict] = {}
         self._cleanup_task: Optional[asyncio.Task] = None
-        self._db = db
 
-    def set_db(self, db: AsyncSession) -> None:
-        """Set database session for persistent session operations."""
-        self._db = db
-
-    def _get_session_repo(self) -> Optional[SessionRepository]:
-        """Get SessionRepository if database is available."""
-        if self._db:
-            return SessionRepository(self._db)
-        return None
+    def _get_session_repo(self, db: AsyncSession) -> SessionRepository:
+        """Get SessionRepository with provided database session."""
+        return SessionRepository(db)
 
     async def create_or_update_db_session(
         self,
         user_id: int,
         phone_number: str,
         api_id: int,
-        api_hash: str
+        api_hash: str,
+        db: AsyncSession
     ) -> None:
         """
         Create or update a session record in the database to persist API credentials.
@@ -58,11 +51,9 @@ class SessionService:
             phone_number: Phone number
             api_id: Telegram API ID
             api_hash: Telegram API Hash
+            db: Database session
         """
-        session_repo = self._get_session_repo()
-        if not session_repo:
-            logger.warning("No database session available, cannot persist session credentials")
-            return
+        session_repo = self._get_session_repo(db)
 
         try:
             # Check if session already exists
@@ -77,8 +68,9 @@ class SessionService:
                     await session_repo.update_last_used(existing_session)
                     logger.info(f"Updated session credentials in database for {phone_number}")
                 else:
-                    await session_repo.update_last_used(existing_session)
-                    logger.debug(f"Updated session activity for {phone_number}")
+                    # Credentials haven't changed, no need to update last_used here
+                    # as it's already handled by the auth middleware more efficiently
+                    logger.debug(f"Session credentials unchanged for {phone_number}")
             else:
                 # Create new session record
                 session_name = self._telegram_service._get_session_name(phone_number, api_id, api_hash)
@@ -215,28 +207,30 @@ class SessionService:
         logger.info(f"Found valid session for {phone_number}")
         return session_data
 
-    async def remove_temp_session(self, phone_number: str) -> None:
+    async def remove_temp_session(self, phone_number: str, disconnect: bool = True) -> None:
         """
         Remove temporary session.
 
         Args:
             phone_number: Phone number
+            disconnect: Whether to disconnect the client (default: True)
         """
         session_key = self._get_session_key(phone_number)
         if session_key in self._temp_sessions:
             session_data = self._temp_sessions[session_key]
-            client = session_data.get("client")
-
-            # Disconnect client if it exists
-            if client:
-                try:
-                    if hasattr(client, "is_connected") and client.is_connected():
-                        await client.disconnect()
-                except Exception as e:
-                    logger.warning(f"Error disconnecting temp session client: {e}")
+            
+            if disconnect:
+                client = session_data.get("client")
+                # Disconnect client if it exists
+                if client:
+                    try:
+                        if hasattr(client, "is_connected") and client.is_connected():
+                            await client.disconnect()
+                    except Exception as e:
+                        logger.warning(f"Error disconnecting temp session client: {e}")
 
             del self._temp_sessions[session_key]
-            logger.debug(f"Removed temporary session for {phone_number}")
+            logger.debug(f"Removed temporary session for {phone_number} (disconnect={disconnect})")
 
     async def cleanup(self) -> None:
         """Clean up all temporary sessions and stop cleanup task."""

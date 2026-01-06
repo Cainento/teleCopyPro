@@ -10,6 +10,9 @@ from sqlalchemy import select, and_
 from app.database.models import User
 from app.database.connection import AsyncSessionLocal
 from app.models.user import UserPlan
+from app.services.telegram_service import TelegramService
+from app.services.copy_service import CopyService
+from app.database.repositories.job_repository import JobRepository
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +30,7 @@ class PlanExpiryScheduler:
         self.interval = interval_seconds
         self.running = False
         self._task: Optional[asyncio.Task] = None
+        self.telegram_service: Optional[TelegramService] = None
 
     async def start(self):
         """Start the background scheduler."""
@@ -88,6 +92,27 @@ class PlanExpiryScheduler:
 
                 # Downgrade each expired user
                 for user in expired_users:
+                    # Stop limits-breaking jobs (real-time jobs)
+                    if self.telegram_service:
+                        try:
+                            # Initialize services with current session
+                            copy_service = CopyService(self.telegram_service, db)
+                            job_repo = JobRepository(db)
+
+                            # Find active real-time jobs
+                            real_time_jobs = await job_repo.get_real_time_jobs_by_user(user.id)
+                            
+                            for job in real_time_jobs:
+                                logger.info(
+                                    f"Stopping real-time job {job.job_id} for user {user.id} "
+                                    f"due to plan expiry (downgrade to FREE)"
+                                )
+                                # Stop the job
+                                await copy_service.stop_real_time_copy(job.job_id)
+                                
+                        except Exception as e:
+                            logger.error(f"Error stopping real-time jobs for user {user.id}: {e}", exc_info=True)
+
                     old_plan = user.plan
                     user.plan = UserPlan.FREE
                     user.plan_expiry = None

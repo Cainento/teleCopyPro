@@ -37,44 +37,38 @@ SESSION_EXPIRATION_DAYS = 7
 class TelegramService:
     """Service for managing Telegram client connections and authentication."""
 
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self):
         """Initialize Telegram service.
-
-        Args:
-            db: Optional database session for session tracking
         """
         self._active_clients: dict[str, TelegramClient] = {}
+        self._locks: dict[str, asyncio.Lock] = {} # session_name -> asyncio.Lock
         self._real_time_handlers: dict[str, dict] = {}  # job_id -> {handler, phone_number}
         self._session_credentials: dict[str, dict[str, any]] = {}  # phone_number -> {api_id, api_hash}
         self._session_path = Path(settings.session_folder)
         self._session_path.mkdir(parents=True, exist_ok=True)
-        self._db = db
 
-    def set_db(self, db: AsyncSession):
-        """Set database session for session tracking."""
-        self._db = db
+    def _get_session_repo(self, db: AsyncSession) -> SessionRepository:
+        """Get SessionRepository with provided database session."""
+        return SessionRepository(db)
 
-    def _get_session_repo(self) -> Optional[SessionRepository]:
-        """Get SessionRepository if database is available."""
-        if self._db:
-            return SessionRepository(self._db)
-        return None
+    def _get_lock(self, session_name: str) -> asyncio.Lock:
+        """Get or create an asyncio.Lock for a specific session."""
+        if session_name not in self._locks:
+            self._locks[session_name] = asyncio.Lock()
+        return self._locks[session_name]
 
-    async def _is_session_expired(self, phone_number: str) -> bool:
+    async def _is_session_expired(self, phone_number: str, db: AsyncSession) -> bool:
         """
         Check if session is expired (>7 days of inactivity).
 
         Args:
             phone_number: Phone number to check
+            db: Database session
 
         Returns:
             True if session is expired or doesn't exist, False otherwise
         """
-        session_repo = self._get_session_repo()
-        if not session_repo:
-            # If no database available, cannot check expiration
-            return False
-
+        session_repo = self._get_session_repo(db)
         try:
             db_session = await session_repo.get_by_phone(phone_number)
             if not db_session:
@@ -92,7 +86,7 @@ class TelegramService:
             logger.error(f"Error checking session expiration: {e}", exc_info=True)
             return False  # Don't block on errors
 
-    async def _update_session_activity(self, phone_number: str, api_id: int, api_hash: str, user_id: Optional[int] = None):
+    async def _update_session_activity(self, phone_number: str, api_id: int, api_hash: str, db: AsyncSession, user_id: Optional[int] = None):
         """
         Update session activity timestamp in database.
 
@@ -100,11 +94,10 @@ class TelegramService:
             phone_number: Phone number
             api_id: API ID
             api_hash: API Hash
+            db: Database session
             user_id: User ID (optional, will be looked up if not provided)
         """
-        session_repo = self._get_session_repo()
-        if not session_repo:
-            return
+        session_repo = self._get_session_repo(db)
 
         try:
             db_session = await session_repo.get_by_phone(phone_number)
@@ -127,6 +120,11 @@ class TelegramService:
                 logger.info(f"Created session record in database for {phone_number}")
         except Exception as e:
             logger.error(f"Error updating session activity: {e}", exc_info=True)
+            # Try to rollback to prevent request poisoning
+            try:
+                await db.rollback()
+            except:
+                pass
 
     def _get_session_name(self, phone_number: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> str:
         """
@@ -211,7 +209,8 @@ class TelegramService:
         self,
         phone_number: str,
         api_id: int,
-        api_hash: str
+        api_hash: str,
+        db: AsyncSession
     ) -> TelegramClient:
         """
         Get existing client or create a new one.
@@ -220,46 +219,64 @@ class TelegramService:
             phone_number: Phone number
             api_id: Telegram API ID
             api_hash: Telegram API Hash
+            db: Database session
 
         Returns:
             TelegramClient instance
         """
         session_name = self._get_session_name(phone_number, api_id, api_hash)
-        logger.debug(f"[GET_OR_CREATE_CLIENT] Session name: {session_name}")
+        
+        async with self._get_lock(session_name):
+            logger.debug(f"[GET_OR_CREATE_CLIENT] Session name: {session_name} (Lock acquired)")
 
-        # Check if session is expired (>7 days)
-        is_expired = await self._is_session_expired(phone_number)
-        if is_expired:
-            logger.info(f"[GET_OR_CREATE_CLIENT] Session expired for {phone_number}, logging out")
-            try:
-                await self.logout(phone_number, api_id, api_hash)
-            except Exception as e:
-                logger.error(f"Error during auto-logout of expired session: {e}", exc_info=True)
+            # Check if session is expired (>7 days)
+            is_expired = await self._is_session_expired(phone_number, db)
+            if is_expired:
+                logger.info(f"[GET_OR_CREATE_CLIENT] Session expired for {phone_number}, logging out")
+                try:
+                    if session_name in self._active_clients:
+                        client = self._active_clients.pop(session_name)
+                        if client.is_connected():
+                            await client.disconnect()
+                    
+                    session_path = self._get_session_path(session_name)
+                    if session_path.exists():
+                        session_path.unlink()
+                except Exception as e:
+                    logger.error(f"Error during auto-logout of expired session: {e}", exc_info=True)
 
-        # Check if client is already active
-        if session_name in self._active_clients and not is_expired:
-            client = self._active_clients[session_name]
-            logger.debug(f"[GET_OR_CREATE_CLIENT] Found active client, connected: {client.is_connected()}")
-            if client.is_connected():
-                return client
-            logger.debug(f"[GET_OR_CREATE_CLIENT] Active client not connected, creating new one")
+            # Check if client is already active
+            if session_name in self._active_clients and not is_expired:
+                client = self._active_clients[session_name]
+                logger.debug(f"[GET_OR_CREATE_CLIENT] Found active client object, connected: {client.is_connected()}")
+                if client.is_connected():
+                    return client
+                
+                # If disconnected, try to reconnect the existing client object instead of creating a new one
+                try:
+                    logger.info(f"[GET_OR_CREATE_CLIENT] Reconnecting existing client for {phone_number}")
+                    await client.connect()
+                    return client
+                except Exception as e:
+                    logger.warning(f"[GET_OR_CREATE_CLIENT] Failed to reconnect existing client: {e}, creating new one")
 
-        # Create new client
-        logger.debug(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number}")
-        client = await self.create_client(api_id, api_hash, phone_number=phone_number)
-        await client.connect()
-        logger.debug(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
+            # Create new client
+            logger.debug(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number}")
+            client = await self.create_client(api_id, api_hash, phone_number=phone_number)
+            await client.connect()
+            logger.debug(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
 
-        # Store active client
-        self._active_clients[session_name] = client
+            # Store active client
+            self._active_clients[session_name] = client
 
-        return client
+            return client
 
     async def send_verification_code(
         self,
         phone_number: str,
         api_id: int,
-        api_hash: str
+        api_hash: str,
+        db: AsyncSession
     ) -> tuple[TelegramClient, str]:
         """
         Send verification code to phone number.
@@ -268,6 +285,7 @@ class TelegramService:
             phone_number: Phone number
             api_id: Telegram API ID
             api_hash: Telegram API Hash
+            db: Database session
 
         Returns:
             Tuple of (client, phone_code_hash)
@@ -278,8 +296,20 @@ class TelegramService:
             ValidationError: If phone number is invalid
         """
         try:
-            # Create client with file-based session directly to avoid migration issues
-            # This ensures the session is properly saved and authorized from the start
+            # Generate session name to check for existing active clients
+            session_name = self._get_session_name(phone_number, api_id, api_hash)
+            
+            # 1. First, ensure any existing active client for this session is disconnected
+            if session_name in self._active_clients:
+                logger.info(f"Discarding existing active client for {phone_number} to avoid locks")
+                old_client = self._active_clients.pop(session_name)
+                try:
+                    if old_client.is_connected():
+                        await old_client.disconnect()
+                except Exception as e:
+                    logger.warning(f"Error disconnecting old client: {e}")
+
+            # 2. Create client with file-based session directly
             client = await self.create_client(
                 api_id,
                 api_hash,
@@ -287,13 +317,15 @@ class TelegramService:
             )
             await client.connect()
 
-            # Check if already authorized
+            # 3. Check if already authorized
             if await client.is_user_authorized():
                 logger.info(f"User {phone_number} already authorized - auto-logout to allow re-authentication")
-                # Auto-logout: disconnect client and delete session file
-                # This ensures user can re-authenticate even if they have an existing session
+                # Auto-logout
                 try:
-                    await self.logout(phone_number, api_id, api_hash)
+                    if client.is_connected():
+                        await client.disconnect()
+                    
+                    await self.logout(phone_number, db, api_id, api_hash)
                     logger.info(f"Successfully logged out {phone_number}, recreating client for new authentication")
 
                     # Recreate client for fresh authentication
@@ -305,8 +337,8 @@ class TelegramService:
                     await client.connect()
                 except Exception as logout_error:
                     logger.error(f"Error during auto-logout for {phone_number}: {logout_error}", exc_info=True)
-                    # Continue anyway - the session file might not exist
-                    pass
+                    if not client.is_connected():
+                        await client.connect()
 
             # Send verification code
             result = await client.send_code_request(phone_number)
@@ -459,6 +491,7 @@ class TelegramService:
     async def check_session_status(
         self,
         phone_number: str,
+        db: AsyncSession,
         api_id: Optional[int] = None,
         api_hash: Optional[str] = None
     ) -> TelegramSession:
@@ -467,50 +500,41 @@ class TelegramService:
 
         Args:
             phone_number: Phone number
-            api_id: Telegram API ID (optional, will try to get from stored credentials)
-            api_hash: Telegram API Hash (optional, will try to get from stored credentials)
+            db: Database session
+            api_id: Telegram API ID (optional)
+            api_hash: Telegram API Hash (optional)
 
         Returns:
             TelegramSession with status information
         """
         # First, ensure we have API credentials before generating session name
-        # Try to get credentials from stored session (in-memory) if not provided
         if api_id is None or api_hash is None:
             stored_creds = self.get_session_credentials(phone_number, api_id, api_hash)
-            logger.debug(f"[CHECK_SESSION] In-memory credentials: {stored_creds is not None}")
             if stored_creds:
                 api_id = api_id or stored_creds.get("api_id")
                 api_hash = api_hash or stored_creds.get("api_hash")
 
         # Try to get credentials from database if still not available
         if api_id is None or api_hash is None:
-            session_repo = self._get_session_repo()
-            if session_repo:
-                try:
-                    db_session = await session_repo.get_by_phone(phone_number)
-                    if db_session and db_session.api_id and db_session.api_hash:
-                        logger.debug(f"[CHECK_SESSION] Found credentials in database for {phone_number}")
-                        api_id = api_id or int(db_session.api_id)
-                        api_hash = api_hash or db_session.api_hash
-                except Exception as e:
-                    logger.error(f"[CHECK_SESSION] Error getting credentials from database: {e}", exc_info=True)
+            session_repo = self._get_session_repo(db)
+            try:
+                db_session = await session_repo.get_by_phone(phone_number)
+                if db_session and db_session.api_id and db_session.api_hash:
+                    api_id = api_id or int(db_session.api_id)
+                    api_hash = api_hash or db_session.api_hash
+            except Exception as e:
+                logger.error(f"[CHECK_SESSION] Error getting credentials from database: {e}", exc_info=True)
 
-        # Fallback to settings if still not available
+        # Fallback to settings
         if api_id is None or api_hash is None:
             from app.config import settings
-            logger.debug(f"[CHECK_SESSION] Falling back to settings API credentials")
             api_id = api_id or settings.api_id
             api_hash = api_hash or settings.api_hash
 
-        # Now generate session name with the resolved API credentials
         session_name = self._get_session_name(phone_number, api_id, api_hash)
         session_path = self._get_session_path(session_name)
 
-        logger.debug(f"[CHECK_SESSION] Phone: {phone_number}, API ID: {api_id}, Session name: {session_name}, Session path: {session_path}")
-
-        logger.debug(f"[CHECK_SESSION] Session path exists: {session_path.exists()}")
         if not session_path.exists():
-            logger.warning(f"[CHECK_SESSION] Session file not found at {session_path}")
             return TelegramSession(
                 session_name=session_name,
                 phone_number=phone_number,
@@ -521,11 +545,8 @@ class TelegramService:
             )
 
         try:
-            logger.debug(f"[CHECK_SESSION] Getting or creating client for {phone_number}")
-            client = await self.get_or_create_client(phone_number, api_id, api_hash)
-            logger.debug(f"[CHECK_SESSION] Client connected: {client.is_connected()}")
+            client = await self.get_or_create_client(phone_number, api_id, api_hash, db)
             is_authorized = await client.is_user_authorized()
-            logger.debug(f"[CHECK_SESSION] Is authorized: {is_authorized}")
 
             if is_authorized:
                 me = await client.get_me()
@@ -571,12 +592,12 @@ class TelegramService:
         if api_id and api_hash:
             # Disconnect specific session
             session_name = self._get_session_name(phone_number, api_id, api_hash)
-            if session_name in self._active_clients:
-                client = self._active_clients[session_name]
-                if client.is_connected():
-                    await client.disconnect()
-                del self._active_clients[session_name]
-                logger.info(f"Disconnected client for {phone_number} with API ID {api_id}")
+            async with self._get_lock(session_name):
+                if session_name in self._active_clients:
+                    client = self._active_clients.pop(session_name)
+                    if client.is_connected():
+                        await client.disconnect()
+                    logger.info(f"Disconnected client for {phone_number} with API ID {api_id}")
         else:
             # Disconnect all sessions for this phone number
             base_name = phone_number.replace("+", "").replace(" ", "").replace("-", "")
@@ -588,14 +609,15 @@ class TelegramService:
                 del self._active_clients[session_name]
                 logger.info(f"Disconnected client session {session_name}")
 
-    async def logout(self, phone_number: str, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> None:
+    async def logout(self, phone_number: str, db: AsyncSession, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> None:
         """
         Logout user by disconnecting Telegram client and deleting session file.
 
         Args:
             phone_number: Phone number
-            api_id: Telegram API ID (optional, will try to get from stored credentials)
-            api_hash: Telegram API Hash (optional, will try to get from stored credentials)
+            db: Database session
+            api_id: Telegram API ID (optional)
+            api_hash: Telegram API Hash (optional)
 
         Raises:
             SessionError: If session doesn't exist
@@ -608,7 +630,7 @@ class TelegramService:
                     api_id = api_id or stored_creds.get("api_id")
                     api_hash = api_hash or stored_creds.get("api_hash")
 
-            # Fallback to settings if still not available
+            # Fallback to settings
             if api_id is None or api_hash is None:
                 from app.config import settings
                 api_id = api_id or settings.api_id
@@ -617,13 +639,18 @@ class TelegramService:
             session_name = self._get_session_name(phone_number, api_id, api_hash)
             session_path = self._get_session_path(session_name)
 
-            # Disconnect active client if exists
-            if session_name in self._active_clients:
-                client = self._active_clients[session_name]
-                if client.is_connected():
-                    await client.disconnect()
-                    logger.info(f"Disconnected Telegram client for {phone_number}")
-                del self._active_clients[session_name]
+            async with self._get_lock(session_name):
+                logger.info(f"Performing logout for {phone_number} (Lock acquired)")
+                
+                # Disconnect active client if exists
+                if session_name in self._active_clients:
+                    client = self._active_clients.pop(session_name)
+                    try:
+                        if client.is_connected():
+                            await client.disconnect()
+                            logger.info(f"Disconnected Telegram client for {phone_number}")
+                    except Exception as disconnect_error:
+                        logger.warning(f"Error disconnecting client {phone_number} during logout: {disconnect_error}")
 
             # Remove from session credentials
             if session_name in self._session_credentials:
@@ -637,16 +664,19 @@ class TelegramService:
                 logger.warning(f"Session file not found: {session_path}")
 
             # Deactivate session in database
-            session_repo = self._get_session_repo()
-            if session_repo:
+            session_repo = self._get_session_repo(db)
+            try:
+                db_session = await session_repo.get_by_phone(phone_number)
+                if db_session:
+                    await session_repo.delete(db_session)
+                    logger.info(f"Deleted session from database for {phone_number}")
+            except Exception as db_error:
+                logger.error(f"Error deleting session from database: {db_error}", exc_info=True)
+                # Rollback to prevent poisoning the rest of the request
                 try:
-                    db_session = await session_repo.get_by_phone(phone_number)
-                    if db_session:
-                        await session_repo.delete(db_session)
-                        logger.info(f"Deleted session from database for {phone_number}")
-                except Exception as db_error:
-                    logger.error(f"Error deleting session from database: {db_error}", exc_info=True)
-                    # Don't fail logout if database operation fails
+                    await db.rollback()
+                except:
+                    pass
 
             logger.info(f"Logout successful for {phone_number}")
 
