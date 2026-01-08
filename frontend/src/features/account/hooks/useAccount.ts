@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 import { userApi, type AccountInfoResponse, type UsageStatsResponse } from '@/api/user.api';
 import { toast } from 'sonner';
-import { getErrorMessage } from '@/lib/errors';
+
 
 export type Plan = 'FREE' | 'PREMIUM' | 'ENTERPRISE';
 
 export interface AccountData {
   phoneNumber: string;
+  email?: string;
   username?: string;
   plan: Plan;
   planExpiry?: string;
@@ -84,10 +85,11 @@ export function useAccount() {
 
   const accountData: AccountData = {
     phoneNumber: session?.phoneNumber || '',
+    email: accountInfo?.email || undefined,
     username: accountInfo?.display_name || session?.username,
     plan: planUppercase,
     planExpiry: accountInfo?.plan_expiry || undefined,
-    activationKey: undefined,
+
   };
 
   const limits = PLAN_LIMITS[accountData.plan];
@@ -99,42 +101,42 @@ export function useAccount() {
       max: usageStats?.realtime_jobs_limit ?? limits.maxRealTimeJobs,
       percentage:
         (usageStats?.realtime_jobs_limit ?? limits.maxRealTimeJobs) === -1 ||
-        (usageStats?.realtime_jobs_limit ?? limits.maxRealTimeJobs) === null
+          (usageStats?.realtime_jobs_limit ?? limits.maxRealTimeJobs) === null
           ? 0
           : Math.min(
-              100,
-              ((usageStats?.realtime_jobs_count || 0) /
-                (usageStats?.realtime_jobs_limit ?? limits.maxRealTimeJobs)) *
-                100
-            ),
+            100,
+            ((usageStats?.realtime_jobs_count || 0) /
+              (usageStats?.realtime_jobs_limit ?? limits.maxRealTimeJobs)) *
+            100
+          ),
     },
     historicalJobs: {
       current: usageStats?.historical_jobs_count || 0,
       max: usageStats?.historical_jobs_limit ?? limits.maxHistoricalJobs,
       percentage:
         (usageStats?.historical_jobs_limit ?? limits.maxHistoricalJobs) === -1 ||
-        (usageStats?.historical_jobs_limit ?? limits.maxHistoricalJobs) === null
+          (usageStats?.historical_jobs_limit ?? limits.maxHistoricalJobs) === null
           ? 0
           : Math.min(
-              100,
-              ((usageStats?.historical_jobs_count || 0) /
-                (usageStats?.historical_jobs_limit ?? limits.maxHistoricalJobs)) *
-                100
-            ),
+            100,
+            ((usageStats?.historical_jobs_count || 0) /
+              (usageStats?.historical_jobs_limit ?? limits.maxHistoricalJobs)) *
+            100
+          ),
     },
     messagesPerDay: {
       current: usageStats?.messages_copied_today || 0,
       max: usageStats?.usage_limit ?? limits.maxMessagesPerDay,
       percentage:
         (usageStats?.usage_limit ?? limits.maxMessagesPerDay) === -1 ||
-        (usageStats?.usage_limit ?? limits.maxMessagesPerDay) === null
+          (usageStats?.usage_limit ?? limits.maxMessagesPerDay) === null
           ? 0
           : Math.min(
-              100,
-              ((usageStats?.messages_copied_today || 0) /
-                (usageStats?.usage_limit ?? limits.maxMessagesPerDay)) *
-                100
-            ),
+            100,
+            ((usageStats?.messages_copied_today || 0) /
+              (usageStats?.usage_limit ?? limits.maxMessagesPerDay)) *
+            100
+          ),
     },
   };
 

@@ -474,13 +474,14 @@ class UserService:
         logger.info(f"Created new user for phone: {phone_number}")
         return self._db_to_pydantic(db_user)
 
-    async def update_user_by_phone(self, phone_number: str, display_name: Optional[str] = None) -> PydanticUser:
+    async def update_user_by_phone(self, phone_number: str, name: Optional[str] = None, email: Optional[str] = None) -> PydanticUser:
         """
-        Update user information by phone number.
+        Update user profile by phone number.
 
         Args:
             phone_number: User's phone number
-            display_name: New display name
+            name: New display name (optional)
+            email: New email (optional)
 
         Returns:
             Updated user
@@ -492,8 +493,10 @@ class UserService:
         if not db_user:
             raise NotFoundError(f"Usuário com telefone {phone_number} não encontrado")
 
-        if display_name is not None:
-            db_user.name = display_name
+        if name is not None:
+            db_user.name = name
+        if email is not None:
+            db_user.email = email
 
         updated_user = await self.user_repo.update(db_user)
         logger.info(f"Updated user: {phone_number}")

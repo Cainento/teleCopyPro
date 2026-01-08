@@ -816,6 +816,7 @@ async def get_account_info(
 
         response_data = AccountInfoResponse(
             phone_number=phone_number,
+            email=user.email,
             display_name=user.name,
             plan=user.plan,
             plan_expiry=user.plan_expiry,
@@ -982,7 +983,8 @@ async def update_profile(
     Update user profile information for authenticated user.
 
     Request body:
-        - display_name: str
+        - display_name: str (optional)
+        - email: str (optional)
 
     Returns:
         JSON with update confirmation
@@ -992,19 +994,25 @@ async def update_profile(
         # Use authenticated user's phone number
         phone_number = current_user.phone_number
         display_name = data.get("display_name")
+        email = data.get("email")
 
-        if not display_name:
-            raise TeleCopyException("Nome de exibição é obrigatório.", 400)
+        if not display_name and not email:
+            raise TeleCopyException("Nome de exibição ou email são obrigatórios.", 400)
 
-        if len(display_name) < 1 or len(display_name) > 100:
+        if display_name and (len(display_name) < 1 or len(display_name) > 100):
             raise TeleCopyException("Nome de exibição deve ter entre 1 e 100 caracteres.", 400)
-
+            
         # Update user profile
-        user = await user_service.update_user_by_phone(phone_number, display_name)
+        user = await user_service.update_user_by_phone(
+            phone_number=phone_number, 
+            name=display_name,
+            email=email
+        )
 
         response_data = ProfileUpdateResponse(
             message="Perfil atualizado com sucesso!",
-            display_name=user.name
+            display_name=user.name,
+            email=user.email
         )
         return JSONResponse(
             content=response_data.model_dump(mode='json'),

@@ -5,7 +5,8 @@ import { cn } from '@/lib/cn';
 import { redirectToCheckout, STRIPE_PRICE_IDS } from '@/api/stripe.api';
 import { PaymentMethodModal } from './PaymentMethodModal';
 import { PixQrCodeModal } from './PixQrCodeModal';
-import type { Plan } from '../hooks/useAccount';
+import { CardEmailModal } from './CardEmailModal';
+import { useAccount, type Plan } from '../hooks/useAccount';
 
 interface UpgradePlanProps {
     currentPlan: Plan;
@@ -96,7 +97,10 @@ export function UpgradePlan({ currentPlan, className, onPlanUpdated }: UpgradePl
     // Payment modal state
     const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
     const [showPixModal, setShowPixModal] = useState(false);
+    const [showEmailModal, setShowEmailModal] = useState(false);
     const [selectedPlan, setSelectedPlan] = useState<PlanOption | null>(null);
+
+    const { accountData } = useAccount();
 
     const handleUpgrade = async (plan: PlanOption) => {
         console.log('[UpgradePlan] handleUpgrade called with plan:', plan.id);
@@ -121,6 +125,19 @@ export function UpgradePlan({ currentPlan, className, onPlanUpdated }: UpgradePl
 
         if (!selectedPlan) return;
 
+        // Check if user has email
+        if (!accountData?.email) {
+            console.log('[UpgradePlan] User needs to provide email');
+            setShowEmailModal(true);
+            return;
+        }
+
+        await proceedToCheckout();
+    };
+
+    const proceedToCheckout = async () => {
+        if (!selectedPlan) return;
+
         const priceId = isAnnual ? selectedPlan.stripePriceIdAnnual : selectedPlan.stripePriceIdMonthly;
         console.log('[UpgradePlan] Selected price ID:', priceId, 'isAnnual:', isAnnual);
 
@@ -142,6 +159,16 @@ export function UpgradePlan({ currentPlan, className, onPlanUpdated }: UpgradePl
         }
     };
 
+    const handleEmailSuccess = async () => {
+        setShowEmailModal(false);
+        // Force a page reload/data refresh to update context? 
+        // Actually we can just proceed, userApi updated the backend.
+        // However, useAccount might still have old data until refetch.
+        // proceedToCheckout doesn't rely on accountData, it just redirects.
+        // So we can just proceed.
+        await proceedToCheckout();
+    };
+
     const handlePixPaymentSuccess = () => {
         setShowPixModal(false);
         setSelectedPlan(null);
@@ -159,6 +186,7 @@ export function UpgradePlan({ currentPlan, className, onPlanUpdated }: UpgradePl
     const handleCloseModals = () => {
         setShowPaymentMethodModal(false);
         setShowPixModal(false);
+        setShowEmailModal(false);
         setSelectedPlan(null);
     };
 
@@ -361,6 +389,14 @@ export function UpgradePlan({ currentPlan, className, onPlanUpdated }: UpgradePl
                     formattedPrice={getSelectedPlanPrice()}
                 />
             )}
+
+            {/* Email Collection Modal */}
+            <CardEmailModal
+                isOpen={showEmailModal}
+                onClose={handleCloseModals}
+                onSuccess={handleEmailSuccess}
+                phoneNumber={accountData?.phoneNumber || ''}
+            />
         </>
     );
 }

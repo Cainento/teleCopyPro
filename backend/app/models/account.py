@@ -12,6 +12,7 @@ class AccountInfoResponse(BaseModel):
     """Account information response model."""
 
     phone_number: str = Field(..., description="User's phone number")
+    email: Optional[str] = Field(None, description="User's email address")
     display_name: Optional[str] = Field(None, description="User's display name")
     plan: UserPlan = Field(..., description="Current plan type")
     plan_expiry: Optional[datetime] = Field(None, description="Plan expiration date")
@@ -95,11 +96,13 @@ class ProfileUpdateRequest(BaseModel):
     """Profile update request model."""
 
     phone_number: str = Field(..., description="User's phone number")
-    display_name: str = Field(..., min_length=1, max_length=100, description="New display name")
+    display_name: Optional[str] = Field(None, min_length=1, max_length=100, description="New display name")
+    email: Optional[str] = Field(None, description="New email address")
 
 
 class ProfileUpdateResponse(BaseModel):
     """Profile update response model."""
 
     message: str = Field(..., description="Success message")
-    display_name: str = Field(..., description="Updated display name")
+    display_name: Optional[str] = Field(None, description="Updated display name")
+    email: Optional[str] = Field(None, description="Updated email address")

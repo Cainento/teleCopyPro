@@ -24,6 +24,7 @@ export interface UsageStatsResponse {
 
 export interface AccountInfoResponse {
   phone_number: string;
+  email: string | null;
   display_name: string | null;
   plan: 'free' | 'premium' | 'enterprise';
   plan_expiry: string | null;
@@ -87,10 +88,11 @@ export const userApi = {
   /**
    * Update user profile
    */
-  async updateProfile(phoneNumber: string, displayName: string): Promise<{ message: string; display_name: string }> {
+  async updateProfile(phoneNumber: string, displayName?: string, email?: string): Promise<{ message: string; display_name: string; email: string }> {
     const response = await apiClient.put('/api/user/profile', {
       phone_number: phoneNumber,
       display_name: displayName,
+      email: email,
     });
     return response.data;
   },
