@@ -69,10 +69,14 @@ class UserService:
         Returns:
             Pydantic user instance
         """
+        email = db_user.email
+        if email and email.endswith("@telegram.user"):
+            email = None
+
         return PydanticUser(
             id=db_user.id,
             phone_number=db_user.phone_number,
-            email=db_user.email,
+            email=email,
             name=db_user.name,
             plan=db_user.plan,
             usage_count=db_user.usage_count,

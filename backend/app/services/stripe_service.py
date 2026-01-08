@@ -52,6 +52,18 @@ class StripeService:
             # Check if user already has a Stripe customer
             if user.stripe_customer_id:
                 logger.info(f"User {user.id} already has Stripe customer: {user.stripe_customer_id}")
+                
+                # Update customer email if provided
+                if user.email:
+                    try:
+                        stripe.Customer.modify(
+                            user.stripe_customer_id,
+                            email=user.email
+                        )
+                        logger.info(f"Updated email for customer {user.stripe_customer_id} to {user.email}")
+                    except Exception as e:
+                        logger.warning(f"Failed to update email for customer {user.stripe_customer_id}: {e}")
+                
                 return user.stripe_customer_id
 
             # Prepare customer data, handling optional fields
