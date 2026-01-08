@@ -1,91 +1,101 @@
 import { motion } from 'framer-motion';
-
-interface Step {
-  number: number;
-  title: string;
-  description: string;
-}
-
-const steps: Step[] = [
-  {
-    number: 1,
-    title: 'Conecte sua Conta',
-    description: 'Autentique-se com suas credenciais do Telegram de forma segura',
-  },
-  {
-    number: 2,
-    title: 'Selecione os Canais',
-    description: 'Escolha o canal de origem e destino para a cópia de mensagens',
-  },
-  {
-    number: 3,
-    title: 'Configure a Cópia',
-    description: 'Defina se deseja cópia histórica, em tempo real, ou ambas',
-  },
-  {
-    number: 4,
-    title: 'Monitore o Progresso',
-    description: 'Acompanhe o status das operações no seu dashboard profissional',
-  },
-];
-
-const staggerContainer = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.15,
-      delayChildren: 0.2,
-    },
-  },
-};
-
-const fadeInUp = {
-  hidden: { opacity: 0, y: 20 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.6, ease: 'easeOut' as const },
-  },
-};
+import { UserPlus, Settings, Play, CheckCircle2 } from 'lucide-react';
+import { cn } from '@/lib/cn';
 
 export function HowItWorksSection() {
-  return (
-    <section id="how-it-works" className="py-16 md:py-24 bg-muted/20">
-      <div className="container mx-auto px-4 max-w-6xl">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: '-100px' }}
-          transition={{ duration: 0.6 }}
-        >
-          <h2 className="text-3xl md:text-4xl font-bold text-center mb-12">
-            Como Funciona
-          </h2>
-        </motion.div>
+    const steps = [
+        {
+            id: 1,
+            title: 'Crie sua Conta',
+            description: 'Cadastre-se em segundos e configure seu perfil no Clona Gram.',
+            icon: UserPlus,
+            color: 'text-blue-500',
+            bgColor: 'bg-blue-500/10',
+        },
+        {
+            id: 2,
+            title: 'Configure os Canais',
+            description: 'Defina o canal de origem (que você quer copiar) e o de destino.',
+            icon: Settings,
+            color: 'text-purple-500',
+            bgColor: 'bg-purple-500/10',
+        },
+        {
+            id: 3,
+            title: 'Inicie a Cópia',
+            description: 'O sistema começa a trabalhar instantaneamente em tempo real.',
+            icon: Play,
+            color: 'text-green-500',
+            bgColor: 'bg-green-500/10',
+        },
+    ];
 
-        <motion.div
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8"
-          variants={staggerContainer}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, margin: '-100px' }}
-        >
-          {steps.map((step) => (
-            <motion.div
-              key={step.number}
-              variants={fadeInUp}
-              className="text-center"
-            >
-              <div className="w-16 h-16 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-2xl font-bold mx-auto mb-4">
-                {step.number}
-              </div>
-              <h3 className="text-lg font-semibold mb-2">{step.title}</h3>
-              <p className="text-muted-foreground">{step.description}</p>
-            </motion.div>
-          ))}
-        </motion.div>
-      </div>
-    </section>
-  );
+    return (
+        <section id="how-it-works" className="py-24 relative overflow-hidden bg-muted/30">
+            <div className="container mx-auto px-4 md:px-6">
+                <div className="text-center max-w-3xl mx-auto mb-16">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-4"
+                    >
+                        <span className="flex h-2 w-2 rounded-full bg-primary" />
+                        Simples e Rápido
+                    </motion.div>
+
+                    <h2 className="text-3xl md:text-5xl font-bold mb-4">
+                        Como funciona o <span className="text-gradient">Clona Gram</span>
+                    </h2>
+                    <p className="text-lg text-muted-foreground">
+                        Configure sua automação em 3 passos simples e comece a escalar seus canais.
+                    </p>
+                </div>
+
+                <div className="relative">
+                    {/* Connector Line (Desktop) */}
+                    <div className="hidden md:block absolute top-1/2 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-border to-transparent -translate-y-1/2 z-0" />
+
+                    <div className="grid md:grid-cols-3 gap-8 relative z-10">
+                        {steps.map((step, index) => {
+                            const Icon = step.icon;
+                            return (
+                                <motion.div
+                                    key={step.id}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    whileInView={{ opacity: 1, y: 0 }}
+                                    viewport={{ once: true }}
+                                    transition={{ delay: index * 0.2 }}
+                                    className="relative group"
+                                >
+                                    <div className="card-hover bg-background border border-border/50 rounded-2xl p-8 relative h-full flex flex-col items-center text-center">
+                                        {/* Step Number Badge */}
+                                        <div className="absolute -top-4 bg-background border border-border shadow-sm px-3 py-1 rounded-full text-sm font-bold text-muted-foreground">
+                                            Passo 0{step.id}
+                                        </div>
+
+                                        <div className={cn(
+                                            "w-16 h-16 rounded-2xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110 duration-300",
+                                            step.bgColor
+                                        )}>
+                                            <Icon className={cn("w-8 h-8", step.color)} />
+                                        </div>
+
+                                        <h3 className="text-xl font-bold mb-3">{step.title}</h3>
+                                        <p className="text-muted-foreground leading-relaxed mb-6">
+                                            {step.description}
+                                        </p>
+
+                                        <div className="mt-auto pt-6 border-t w-full border-border/30">
+                                            <CheckCircle2 className={cn("w-5 h-5 mx-auto opacity-50", step.color)} />
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+        </section>
+    );
 }

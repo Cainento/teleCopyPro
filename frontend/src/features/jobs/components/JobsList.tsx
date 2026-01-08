@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { Search, Filter, Plus } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Filter, Plus, Sparkles, Briefcase } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { JobCard } from './JobCard';
 import { cn } from '@/lib/cn';
@@ -18,6 +19,19 @@ interface JobsListProps {
 
 type JobStatus = 'all' | 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'stopped';
 
+const staggerContainer = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.05 },
+  },
+};
+
+const fadeInUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+};
+
 export function JobsList({
   jobs,
   onStop,
@@ -32,21 +46,17 @@ export function JobsList({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<JobStatus>('all');
 
-  // Filter jobs based on search and status
   const filteredJobs = useMemo(() => {
     let filtered = jobs;
 
-    // Filter by status
     if (statusFilter !== 'all') {
       if (statusFilter === 'completed') {
-        // Special case: completed filter includes both 'completed' and 'stopped'
         filtered = filtered.filter((job) => job.status === 'completed' || job.status === 'stopped');
       } else {
         filtered = filtered.filter((job) => job.status === statusFilter);
       }
     }
 
-    // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
@@ -60,134 +70,153 @@ export function JobsList({
     return filtered;
   }, [jobs, searchQuery, statusFilter]);
 
-  // Status filters
   const filters: Array<{ value: JobStatus; label: string; count: number }> = [
     { value: 'all', label: 'Todos', count: jobs.length },
-    {
-      value: 'running',
-      label: 'Em Execução',
-      count: jobs.filter((j) => j.status === 'running').length,
-    },
-    {
-      value: 'paused',
-      label: 'Pausados',
-      count: jobs.filter((j) => j.status === 'paused').length,
-    },
-    {
-      value: 'pending',
-      label: 'Pendentes',
-      count: jobs.filter((j) => j.status === 'pending').length,
-    },
-    {
-      value: 'completed',
-      label: 'Concluídos',
-      count: jobs.filter((j) => j.status === 'completed' || j.status === 'stopped').length,
-    },
-    {
-      value: 'failed',
-      label: 'Falhados',
-      count: jobs.filter((j) => j.status === 'failed').length,
-    },
-    // 'stopped' status removed from filters list as it is merged into 'completed'
+    { value: 'running', label: 'Em Execução', count: jobs.filter((j) => j.status === 'running').length },
+    { value: 'paused', label: 'Pausados', count: jobs.filter((j) => j.status === 'paused').length },
+    { value: 'pending', label: 'Pendentes', count: jobs.filter((j) => j.status === 'pending').length },
+    { value: 'completed', label: 'Concluídos', count: jobs.filter((j) => j.status === 'completed' || j.status === 'stopped').length },
+    { value: 'failed', label: 'Falhados', count: jobs.filter((j) => j.status === 'failed').length },
   ];
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+      >
         <div>
-          <h2 className="text-2xl font-bold">Jobs de Cópia</h2>
+          <h1 className="text-2xl md:text-3xl font-bold mb-1">
+            Jobs de <span className="text-gradient">Cópia</span>
+          </h1>
           <p className="text-sm text-muted-foreground">
             {filteredJobs.length} de {jobs.length} jobs
           </p>
         </div>
 
-        <button
+        <motion.button
           onClick={() => navigate('/copy')}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors font-medium"
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className="btn btn-primary shadow-glow group"
         >
-          <Plus className="h-4 w-4" />
-          Novo Job
-        </button>
-      </div>
+          <Sparkles className="w-4 h-4" />
+          <span>Novo Job</span>
+          <Plus className="w-4 h-4" />
+        </motion.button>
+      </motion.div>
 
       {/* Search and Filters */}
-      <div className="space-y-4">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="space-y-4"
+      >
         {/* Search */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <input
             type="text"
             placeholder="Buscar por canal ou ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+            className="input-glass w-full pl-12 pr-4"
           />
         </div>
 
         {/* Status Filters */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-2">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-thin">
           <Filter className="h-4 w-4 text-muted-foreground flex-shrink-0" />
           <div className="flex items-center gap-2">
             {filters.map((filter) => (
-              <button
+              <motion.button
                 key={filter.value}
                 onClick={() => setStatusFilter(filter.value)}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
                 className={cn(
-                  'px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors',
+                  'px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap transition-all duration-200',
                   statusFilter === filter.value
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted hover:bg-muted/80'
+                    ? 'bg-primary text-primary-foreground shadow-md'
+                    : 'bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground'
                 )}
               >
-                {filter.label} ({filter.count})
-              </button>
+                {filter.label}
+                <span className={cn(
+                  'ml-1.5 px-1.5 py-0.5 rounded-md text-xs',
+                  statusFilter === filter.value
+                    ? 'bg-white/20'
+                    : 'bg-muted-foreground/10'
+                )}>
+                  {filter.count}
+                </span>
+              </motion.button>
             ))}
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Jobs Grid */}
-      {filteredJobs.length === 0 ? (
-        <div className="bg-card border rounded-lg p-12 text-center">
-          <div className="max-w-md mx-auto">
-            <div className="mb-4 text-muted-foreground">
-              <Filter className="h-12 w-12 mx-auto" />
+      <AnimatePresence mode="wait">
+        {filteredJobs.length === 0 ? (
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-2xl p-12 text-center"
+          >
+            <div className="max-w-md mx-auto">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-muted/50 flex items-center justify-center">
+                <Briefcase className="h-10 w-10 text-muted-foreground" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">Nenhum job encontrado</h3>
+              <p className="text-muted-foreground mb-6">
+                {searchQuery || statusFilter !== 'all'
+                  ? 'Tente ajustar os filtros de busca'
+                  : 'Crie seu primeiro job de cópia para começar'}
+              </p>
+              {!searchQuery && statusFilter === 'all' && (
+                <motion.button
+                  onClick={() => navigate('/copy')}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="btn btn-primary"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Criar Novo Job</span>
+                </motion.button>
+              )}
             </div>
-            <h3 className="text-lg font-semibold mb-2">Nenhum job encontrado</h3>
-            <p className="text-sm text-muted-foreground mb-6">
-              {searchQuery || statusFilter !== 'all'
-                ? 'Tente ajustar os filtros de busca'
-                : 'Crie seu primeiro job de cópia para começar'}
-            </p>
-            {!searchQuery && statusFilter === 'all' && (
-              <button
-                onClick={() => navigate('/copy')}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors font-medium"
-              >
-                <Plus className="h-4 w-4" />
-                Criar Novo Job
-              </button>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {filteredJobs.map((job) => (
-            <JobCard
-              key={job.id}
-              job={job}
-              onStop={onStop}
-              onPause={onPause}
-              onResume={onResume}
-              onClick={onJobClick}
-              isStoppingJob={isStoppingJob}
-              isPausingJob={isPausingJob}
-              isResumingJob={isResumingJob}
-            />
-          ))}
-        </div>
-      )}
+          </motion.div>
+        ) : (
+          <motion.div
+            key="grid"
+            className="grid grid-cols-1 lg:grid-cols-2 gap-4"
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+          >
+            {filteredJobs.map((job) => (
+              <motion.div key={job.id} variants={fadeInUp}>
+                <JobCard
+                  job={job}
+                  onStop={onStop}
+                  onPause={onPause}
+                  onResume={onResume}
+                  onClick={onJobClick}
+                  isStoppingJob={isStoppingJob}
+                  isPausingJob={isPausingJob}
+                  isResumingJob={isResumingJob}
+                />
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

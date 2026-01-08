@@ -1,4 +1,5 @@
-import { User, Phone, LogOut } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { User, Phone, LogOut, Settings, CreditCard, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
@@ -10,6 +11,7 @@ import { UpgradePlan } from './UpgradePlan';
 import { toast } from 'sonner';
 import { ROUTES } from '@/lib/constants';
 import { telegramApi } from '@/api/telegram.api';
+import { cn } from '@/lib/cn';
 
 export function AccountSettings() {
   const navigate = useNavigate();
@@ -21,19 +23,16 @@ export function AccountSettings() {
   const handleLogout = async () => {
     setIsLoggingOut(true);
     try {
-      // Call backend to disconnect Telegram session and delete session file
       await telegramApi.logout({
         api_id: sessionData?.apiId,
         api_hash: sessionData?.apiHash,
       });
-
       toast.success('Você foi desconectado');
       logout();
       navigate(ROUTES.LOGIN);
     } catch (error) {
       console.error('Logout error:', error);
       toast.error('Erro ao desconectar. Fazendo logout local...');
-      // Even if backend logout fails, clear local session
       logout();
       navigate(ROUTES.LOGIN);
     } finally {
@@ -44,15 +43,23 @@ export function AccountSettings() {
   if (isLoading) {
     return (
       <div className="space-y-8">
-        <div>
-          <h2 className="text-2xl font-bold mb-2">Configurações da Conta</h2>
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h1 className="text-2xl md:text-3xl font-bold mb-1">
+            Configurações da <span className="text-gradient">Conta</span>
+          </h1>
           <p className="text-muted-foreground">
-            Gerencie sua conta, plano e visualize estatísticas de uso
+            Gerencie sua conta, plano e estatísticas de uso
           </p>
-        </div>
-        <div className="flex items-center justify-center py-12">
+        </motion.div>
+
+        <div className="flex items-center justify-center py-16">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            </div>
             <p className="text-muted-foreground">Carregando dados da conta...</p>
           </div>
         </div>
@@ -63,59 +70,101 @@ export function AccountSettings() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold mb-2">Configurações da Conta</h2>
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <h1 className="text-2xl md:text-3xl font-bold mb-1">
+          Configurações da <span className="text-gradient">Conta</span>
+        </h1>
         <p className="text-muted-foreground">
-          Gerencie sua conta, plano e visualize estatísticas de uso
+          Gerencie sua conta, plano e estatísticas de uso
         </p>
-      </div>
+      </motion.div>
 
       {/* Profile Card */}
-      <div className="bg-card border rounded-lg p-6">
-        <div className="flex items-center justify-between">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="bg-card/80 backdrop-blur-sm border border-border/50 rounded-2xl p-6"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="p-3 bg-primary/10 rounded-full">
-              <User className="h-6 w-6 text-primary" />
+            {/* Avatar */}
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-lg">
+              <User className="h-8 w-8 text-white" />
             </div>
+
             <div>
-              <h3 className="text-lg font-semibold">
-                {accountData.username || 'Usuário do Telegram'}
+              <h3 className="text-xl font-bold">
+                {accountData.username ? `@${accountData.username}` : 'Usuário do Telegram'}
               </h3>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-muted-foreground">
                 <Phone className="h-4 w-4" />
                 <span>{accountData.phoneNumber}</span>
               </div>
             </div>
           </div>
 
-          <button
+          <motion.button
             onClick={handleLogout}
             disabled={isLoggingOut}
-            className="flex items-center gap-2 px-4 py-2 bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className={cn(
+              'flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium transition-all',
+              'bg-destructive/10 text-destructive hover:bg-destructive/20',
+              'disabled:opacity-50 disabled:cursor-not-allowed'
+            )}
           >
-            <LogOut className="h-4 w-4" />
-            <span className="text-sm font-medium">{isLoggingOut ? 'Saindo...' : 'Sair'}</span>
-          </button>
+            {isLoggingOut ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogOut className="h-4 w-4" />
+            )}
+            <span>{isLoggingOut ? 'Saindo...' : 'Desconectar'}</span>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Plan Card */}
-      <PlanCard
-        currentPlan={accountData.plan}
-        limits={limits}
-        expiryDate={accountData.planExpiry}
-      />
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+      >
+        <PlanCard
+          currentPlan={accountData.plan}
+          limits={limits}
+          expiryDate={accountData.planExpiry}
+        />
+      </motion.div>
 
       {/* Usage Stats */}
-      <UsageStats
-        realTimeJobs={usage.realTimeJobs}
-        historicalJobs={usage.historicalJobs}
-        messagesPerDay={usage.messagesPerDay}
-        currentPlan={accountData.plan}
-      />
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+      >
+        <UsageStats
+          realTimeJobs={usage.realTimeJobs}
+          historicalJobs={usage.historicalJobs}
+          messagesPerDay={usage.messagesPerDay}
+          currentPlan={accountData.plan}
+        />
+      </motion.div>
 
       {/* Upgrade Plans - Only show for FREE and PREMIUM users */}
-      {accountData.plan !== 'ENTERPRISE' && <UpgradePlan currentPlan={accountData.plan} />}
+      {accountData.plan !== 'ENTERPRISE' && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <UpgradePlan currentPlan={accountData.plan} />
+        </motion.div>
+      )}
     </div>
   );
 }

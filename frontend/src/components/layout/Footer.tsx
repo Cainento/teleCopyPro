@@ -1,11 +1,11 @@
 export function Footer() {
-  const currentYear = new Date().getFullYear();
+    const currentYear = new Date().getFullYear();
 
-  return (
-    <footer className="border-t mt-auto bg-card">
-      <div className="container mx-auto px-4 py-6 text-center text-sm text-muted-foreground">
-        <p>&copy; {currentYear} TeleCopy Pro. Todos os direitos reservados.</p>
-      </div>
-    </footer>
-  );
+    return (
+        <footer className="bg-muted/30 border-t border-border/50 py-8">
+            <div className="container mx-auto px-4 md:px-6 text-center text-sm text-muted-foreground">
+                &copy; {currentYear} Clona Gram. Todos os direitos reservados.
+            </div>
+        </footer>
+    );
 }
