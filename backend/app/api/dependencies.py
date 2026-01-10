@@ -13,6 +13,7 @@ from app.services.pagbank_service import PagBankService
 from app.services.telegram_service import TelegramService
 from app.services.user_service import UserService
 from app.services.admin_service import AdminService
+from app.services.sales_analytics_service import SalesAnalyticsService
 from app.core.security import verify_token
 from app.config import settings
 from app.models.user import User as PydanticUser
@@ -136,6 +137,21 @@ def get_admin_service(
         AdminService instance
     """
     return AdminService(db, telegram_service)
+
+
+def get_sales_analytics_service(
+    db: AsyncSession = Depends(get_db)
+) -> SalesAnalyticsService:
+    """
+    Get SalesAnalyticsService instance with database session.
+
+    Args:
+        db: Database session
+
+    Returns:
+        SalesAnalyticsService instance
+    """
+    return SalesAnalyticsService(db)
 
 
 async def get_current_user(

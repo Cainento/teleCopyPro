@@ -21,6 +21,7 @@ const JobDetailPage = lazy(() => import('./pages/JobDetailPage').then(m => ({ de
 const AccountPage = lazy(() => import('./pages/AccountPage').then(m => ({ default: m.AccountPage })));
 const AdminDashboardPage = lazy(() => import('./pages/admin/AdminDashboardPage').then(m => ({ default: m.AdminDashboardPage })));
 const AdminUsersPage = lazy(() => import('./pages/admin/AdminUsersPage').then(m => ({ default: m.AdminUsersPage })));
+const SalesDashboardPage = lazy(() => import('./pages/admin/SalesDashboardPage').then(m => ({ default: m.SalesDashboardPage })));
 
 // Create React Query client
 const queryClient = new QueryClient({
@@ -101,6 +102,7 @@ function App() {
               <Route element={<AdminRoute />}>
                 <Route path="/admin" element={<AdminDashboardPage />} />
                 <Route path="/admin/users" element={<AdminUsersPage />} />
+                <Route path="/admin/sales" element={<SalesDashboardPage />} />
               </Route>
 
               {/* Landing page */}

@@ -1,6 +1,6 @@
 """API route definitions."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import stripe
@@ -18,6 +18,7 @@ from app.api.dependencies import (
     get_telegram_service,
     get_user_service,
     get_admin_service,
+    get_sales_analytics_service,
 )
 from app.core.exceptions import AuthenticationError, NotFoundError, TeleCopyException, ValidationError
 from app.core.logger import get_logger
@@ -47,6 +48,7 @@ from app.services.stripe_service import StripeService
 from app.services.telegram_service import TelegramService
 from app.services.user_service import UserService
 from app.services.admin_service import AdminService
+from app.services.sales_analytics_service import SalesAnalyticsService
 
 logger = get_logger(__name__)
 
@@ -1787,3 +1789,285 @@ async def admin_check_expired_plans(
         },
         status_code=200
     )
+
+
+# ============================================================================
+# Sales Analytics Endpoints
+# ============================================================================
+
+
+@admin_router.get("/sales/overview")
+async def get_sales_overview(
+    current_user: PydanticUser = Depends(get_current_user),
+    sales_service: SalesAnalyticsService = Depends(get_sales_analytics_service),
+):
+    """
+    Get main sales KPI metrics for the dashboard.
+
+    Returns:
+        JSON with revenue totals, subscription counts, and key metrics
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso de administrador necessário", 403)
+
+    try:
+        overview = await sales_service.get_sales_overview()
+        return JSONResponse(content=overview, status_code=200)
+    except Exception as e:
+        logger.error(f"Error getting sales overview: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao buscar visão geral de vendas: {str(e)}", 500)
+
+
+@admin_router.get("/sales/revenue")
+async def get_revenue_data(
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    sales_service: SalesAnalyticsService = Depends(get_sales_analytics_service),
+):
+    """
+    Get revenue time series data for charts.
+
+    Query parameters:
+        - start_date: Start date (YYYY-MM-DD)
+        - end_date: End date (YYYY-MM-DD)
+        - granularity: day, week, or month
+
+    Returns:
+        JSON with time series revenue data
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso de administrador necessário", 403)
+
+    try:
+        params = request.query_params
+        start_date = None
+        end_date = None
+        
+        if params.get("start_date"):
+            start_date = datetime.strptime(params.get("start_date"), "%Y-%m-%d")
+        if params.get("end_date"):
+            end_date = datetime.strptime(params.get("end_date"), "%Y-%m-%d")
+        
+        granularity = params.get("granularity", "day")
+        if granularity not in ["day", "week", "month"]:
+            granularity = "day"
+        
+        data = await sales_service.get_revenue_by_period(start_date, end_date, granularity)
+        return JSONResponse(content={"data": data}, status_code=200)
+    except Exception as e:
+        logger.error(f"Error getting revenue data: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao buscar dados de receita: {str(e)}", 500)
+
+
+@admin_router.get("/sales/transactions")
+async def get_transactions(
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    sales_service: SalesAnalyticsService = Depends(get_sales_analytics_service),
+):
+    """
+    Get paginated list of all transactions.
+
+    Query parameters:
+        - skip: Number of records to skip (default: 0)
+        - limit: Number of records to return (default: 20)
+        - payment_method: Filter by 'stripe' or 'pix'
+        - status: Filter by status
+        - plan: Filter by plan type
+        - start_date: Filter by start date (YYYY-MM-DD)
+        - end_date: Filter by end date (YYYY-MM-DD)
+
+    Returns:
+        JSON with paginated transaction list
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso de administrador necessário", 403)
+
+    try:
+        params = request.query_params
+        skip = int(params.get("skip", 0))
+        limit = int(params.get("limit", 20))
+        payment_method = params.get("payment_method")
+        status = params.get("status")
+        plan = params.get("plan")
+        
+        start_date = None
+        end_date = None
+        if params.get("start_date"):
+            start_date = datetime.strptime(params.get("start_date"), "%Y-%m-%d")
+        if params.get("end_date"):
+            end_date = datetime.strptime(params.get("end_date"), "%Y-%m-%d")
+        
+        data = await sales_service.get_transactions_paginated(
+            skip=skip,
+            limit=limit,
+            payment_method=payment_method,
+            status=status,
+            plan=plan,
+            start_date=start_date,
+            end_date=end_date
+        )
+        return JSONResponse(content=data, status_code=200)
+    except Exception as e:
+        logger.error(f"Error getting transactions: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao buscar transações: {str(e)}", 500)
+
+
+@admin_router.get("/sales/subscriptions")
+async def get_subscription_metrics(
+    current_user: PydanticUser = Depends(get_current_user),
+    sales_service: SalesAnalyticsService = Depends(get_sales_analytics_service),
+):
+    """
+    Get subscription-related metrics.
+
+    Returns:
+        JSON with subscription counts, MRR, and churn data
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso de administrador necessário", 403)
+
+    try:
+        metrics = await sales_service.get_subscription_metrics()
+        return JSONResponse(content=metrics, status_code=200)
+    except Exception as e:
+        logger.error(f"Error getting subscription metrics: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao buscar métricas de assinaturas: {str(e)}", 500)
+
+
+@admin_router.get("/sales/trends")
+async def get_sales_trends(
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    sales_service: SalesAnalyticsService = Depends(get_sales_analytics_service),
+):
+    """
+    Get complete sales trends data including payment methods and plan breakdown.
+
+    Query parameters:
+        - period: 7, 30, 90, 365 days (default: 30)
+
+    Returns:
+        JSON with revenue trends, payment method breakdown, and plan breakdown
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso de administrador necessário", 403)
+
+    try:
+        params = request.query_params
+        period = int(params.get("period", 30))
+        
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=period)
+        
+        # Determine granularity based on period
+        if period <= 7:
+            granularity = "day"
+        elif period <= 90:
+            granularity = "day"
+        else:
+            granularity = "week"
+        
+        revenue_by_period = await sales_service.get_revenue_by_period(start_date, end_date, granularity)
+        revenue_by_method = await sales_service.get_revenue_by_payment_method()
+        revenue_by_plan = await sales_service.get_revenue_by_plan()
+        
+        return JSONResponse(
+            content={
+                "period": period,
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "end_date": end_date.strftime("%Y-%m-%d"),
+                "revenue_trend": revenue_by_period,
+                "by_payment_method": revenue_by_method,
+                "by_plan": revenue_by_plan
+            },
+            status_code=200
+        )
+    except Exception as e:
+        logger.error(f"Error getting sales trends: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao buscar tendências de vendas: {str(e)}", 500)
+
+
+@admin_router.get("/sales/export")
+async def export_sales_data(
+    request: Request,
+    current_user: PydanticUser = Depends(get_current_user),
+    sales_service: SalesAnalyticsService = Depends(get_sales_analytics_service),
+):
+    """
+    Export sales data as JSON (for PDF generation on frontend).
+
+    Query parameters:
+        - format: json (default), csv
+        - payment_method: Filter by 'stripe' or 'pix'
+        - status: Filter by status
+        - start_date: Filter by start date (YYYY-MM-DD)
+        - end_date: Filter by end date (YYYY-MM-DD)
+
+    Returns:
+        JSON or CSV with all matching transactions and summary
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso de administrador necessário", 403)
+
+    try:
+        params = request.query_params
+        export_format = params.get("format", "json")
+        payment_method = params.get("payment_method")
+        status = params.get("status")
+        
+        start_date = None
+        end_date = None
+        if params.get("start_date"):
+            start_date = datetime.strptime(params.get("start_date"), "%Y-%m-%d")
+        if params.get("end_date"):
+            end_date = datetime.strptime(params.get("end_date"), "%Y-%m-%d")
+        
+        # Get all transactions
+        transactions = await sales_service.get_all_transactions_for_export(
+            payment_method=payment_method,
+            status=status,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        # Get summary data
+        overview = await sales_service.get_sales_overview()
+        
+        if export_format == "csv":
+            # Generate CSV
+            import csv
+            import io
+            
+            output = io.StringIO()
+            if transactions:
+                writer = csv.DictWriter(output, fieldnames=transactions[0].keys())
+                writer.writeheader()
+                for tx in transactions:
+                    writer.writerow(tx)
+            
+            from fastapi.responses import Response
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=sales_export.csv"}
+            )
+        else:
+            return JSONResponse(
+                content={
+                    "export_date": datetime.utcnow().isoformat(),
+                    "filters": {
+                        "payment_method": payment_method,
+                        "status": status,
+                        "start_date": start_date.isoformat() if start_date else None,
+                        "end_date": end_date.isoformat() if end_date else None
+                    },
+                    "summary": overview,
+                    "transactions": transactions,
+                    "total_transactions": len(transactions)
+                },
+                status_code=200
+            )
+    except Exception as e:
+        logger.error(f"Error exporting sales data: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao exportar dados de vendas: {str(e)}", 500)
