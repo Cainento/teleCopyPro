@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Literal
-from sqlalchemy import func, select, desc, and_, case
+from sqlalchemy import func, select, desc, and_, case, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from decimal import Decimal
 
@@ -90,7 +90,7 @@ class SalesAnalyticsService:
         total_users = await self.db.scalar(select(func.count(DBUser.id))) or 0
         paid_users = await self.db.scalar(
             select(func.count(DBUser.id))
-            .where(DBUser.plan.in_([UserPlan.PREMIUM.value, UserPlan.ENTERPRISE.value]))
+            .where(cast(DBUser.plan, String).in_([UserPlan.PREMIUM.value, UserPlan.ENTERPRISE.value]))
         ) or 0
         free_users = total_users - paid_users
         
@@ -248,12 +248,12 @@ class SalesAnalyticsService:
         # PIX payments have plan field
         pix_premium_centavos = await self.db.scalar(
             select(func.coalesce(func.sum(PixPayment.amount), 0))
-            .where(PixPayment.status == "paid", PixPayment.plan == UserPlan.PREMIUM.value)
+            .where(PixPayment.status == "paid", cast(PixPayment.plan, String) == UserPlan.PREMIUM.value)
         ) or 0
         
         pix_enterprise_centavos = await self.db.scalar(
             select(func.coalesce(func.sum(PixPayment.amount), 0))
-            .where(PixPayment.status == "paid", PixPayment.plan == UserPlan.ENTERPRISE.value)
+            .where(PixPayment.status == "paid", cast(PixPayment.plan, String) == UserPlan.ENTERPRISE.value)
         ) or 0
         
         # For Stripe, we need to estimate based on amount ranges
@@ -308,7 +308,7 @@ class SalesAnalyticsService:
         active_premium = await self.db.scalar(
             select(func.count(DBUser.id))
             .where(
-                DBUser.plan == UserPlan.PREMIUM.value,
+                cast(DBUser.plan, String) == UserPlan.PREMIUM.value,
                 (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
             )
         ) or 0
@@ -316,7 +316,7 @@ class SalesAnalyticsService:
         active_enterprise = await self.db.scalar(
             select(func.count(DBUser.id))
             .where(
-                DBUser.plan == UserPlan.ENTERPRISE.value,
+                cast(DBUser.plan, String) == UserPlan.ENTERPRISE.value,
                 (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
             )
         ) or 0
@@ -325,7 +325,7 @@ class SalesAnalyticsService:
         churned = await self.db.scalar(
             select(func.count(DBUser.id))
             .where(
-                DBUser.plan == UserPlan.FREE.value,
+                cast(DBUser.plan, String) == UserPlan.FREE.value,
                 DBUser.plan_expiry.isnot(None),
                 DBUser.plan_expiry < now
             )
