@@ -90,7 +90,7 @@ class SalesAnalyticsService:
         total_users = await self.db.scalar(select(func.count(DBUser.id))) or 0
         paid_users = await self.db.scalar(
             select(func.count(DBUser.id))
-            .where(DBUser.plan.in_([UserPlan.PREMIUM, UserPlan.ENTERPRISE]))
+            .where(DBUser.plan.in_([UserPlan.PREMIUM.value, UserPlan.ENTERPRISE.value]))
         ) or 0
         free_users = total_users - paid_users
         
@@ -248,12 +248,12 @@ class SalesAnalyticsService:
         # PIX payments have plan field
         pix_premium_centavos = await self.db.scalar(
             select(func.coalesce(func.sum(PixPayment.amount), 0))
-            .where(PixPayment.status == "paid", PixPayment.plan == UserPlan.PREMIUM)
+            .where(PixPayment.status == "paid", PixPayment.plan == UserPlan.PREMIUM.value)
         ) or 0
         
         pix_enterprise_centavos = await self.db.scalar(
             select(func.coalesce(func.sum(PixPayment.amount), 0))
-            .where(PixPayment.status == "paid", PixPayment.plan == UserPlan.ENTERPRISE)
+            .where(PixPayment.status == "paid", PixPayment.plan == UserPlan.ENTERPRISE.value)
         ) or 0
         
         # For Stripe, we need to estimate based on amount ranges
@@ -308,7 +308,7 @@ class SalesAnalyticsService:
         active_premium = await self.db.scalar(
             select(func.count(DBUser.id))
             .where(
-                DBUser.plan == UserPlan.PREMIUM,
+                DBUser.plan == UserPlan.PREMIUM.value,
                 (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
             )
         ) or 0
@@ -316,7 +316,7 @@ class SalesAnalyticsService:
         active_enterprise = await self.db.scalar(
             select(func.count(DBUser.id))
             .where(
-                DBUser.plan == UserPlan.ENTERPRISE,
+                DBUser.plan == UserPlan.ENTERPRISE.value,
                 (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
             )
         ) or 0
@@ -325,7 +325,7 @@ class SalesAnalyticsService:
         churned = await self.db.scalar(
             select(func.count(DBUser.id))
             .where(
-                DBUser.plan == UserPlan.FREE,
+                DBUser.plan == UserPlan.FREE.value,
                 DBUser.plan_expiry.isnot(None),
                 DBUser.plan_expiry < now
             )
