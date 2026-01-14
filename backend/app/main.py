@@ -21,8 +21,9 @@ from app.core.exception_handler import (
 )
 from app.core.exceptions import TeleCopyException
 from app.core.logger import get_logger, setup_logger
-from app.database.connection import close_db
+from app.database.connection import close_db, AsyncSessionLocal
 from app.services.telegram_service import TelegramService
+from app.services.copy_service import CopyService
 from app.services.plan_expiry_scheduler import plan_expiry_scheduler
 
 # Setup logging
@@ -55,6 +56,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error starting plan expiry scheduler: {e}", exc_info=True)
 
+    # Resume active real-time jobs
+    try:
+        logger.info("Starting job resume process...")
+        from app.api.dependencies import get_telegram_service
+        
+        # Use a dedicated session for resuming jobs
+        async with AsyncSessionLocal() as db:
+            # Use the singleton TelegramService instance
+            telegram_service = get_telegram_service()
+            copy_service = CopyService(telegram_service, db)
+            await copy_service.resume_all_active_jobs()
+            
+    except Exception as e:
+        logger.error(f"Error resuming active jobs: {e}", exc_info=True)
+
     yield
 
     # Shutdown
@@ -68,7 +84,8 @@ async def lifespan(app: FastAPI):
 
     # Cleanup Telegram clients
     try:
-        telegram_service = TelegramService()
+        from app.api.dependencies import get_telegram_service
+        telegram_service = get_telegram_service()
         await telegram_service.cleanup()
     except Exception as e:
         logger.error(f"Error during cleanup: {e}", exc_info=True)

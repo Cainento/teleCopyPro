@@ -667,3 +667,35 @@ class CopyService:
 
         db_jobs = await self.job_repo.get_by_user(db_user.id)
         return [self._db_to_pydantic(job) for job in db_jobs]
+
+    async def resume_all_active_jobs(self) -> None:
+        """Resume all jobs that are marked as running in the database."""
+        logger.info("Checking for active jobs to resume...")
+        active_jobs = await self.job_repo.get_all_running_real_time_jobs()
+        
+        logger.info(f"Found {len(active_jobs)} active jobs to resume")
+        
+        for job in active_jobs:
+            try:
+                # Basic validation
+                if not job.user or not job.user.phone_number:
+                    logger.warning(f"Skipping job {job.job_id}: No user attached")
+                    continue
+                    
+                logger.info(f"Resuming job {job.job_id} for user {job.user.phone_number}")
+                
+                # We resume by calling start_real_time_copy with the existing job_id
+                # This will re-initialize the client and re-attach the event handlers
+                await self.start_real_time_copy(
+                    phone_number=job.user.phone_number,
+                    source_channel=job.source_channel,
+                    target_channel=job.destination_channel,
+                    copy_media=True,  # Default assumption used in resume logic
+                    job_id=job.job_id
+                )
+                logger.info(f"Successfully resumed job {job.job_id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to resume job {job.job_id}: {e}", exc_info=True)
+                # We don't stop the loop, we want to try to resume other jobs
+

@@ -194,14 +194,14 @@ export function JobsList({
           </motion.div>
         ) : (
           <motion.div
-            key="grid"
+            key={`grid-${statusFilter}-${searchQuery}`} // Force remount when filter changes
             className="grid grid-cols-1 lg:grid-cols-2 gap-4"
             variants={staggerContainer}
             initial="hidden"
             animate="visible"
           >
             {filteredJobs.map((job) => (
-              <motion.div key={job.id} variants={fadeInUp}>
+              <motion.div key={job.id} variants={fadeInUp} layout>
                 <JobCard
                   job={job}
                   onStop={onStop}

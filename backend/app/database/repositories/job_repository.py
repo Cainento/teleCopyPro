@@ -85,6 +85,18 @@ class JobRepository:
         )
         return list(result.scalars().all())
 
+    async def get_all_running_real_time_jobs(self) -> List[CopyJob]:
+        """Get all running real-time jobs across all users."""
+        result = await self.db.execute(
+            select(CopyJob)
+            .options(joinedload(CopyJob.user))
+            .where(
+                CopyJob.mode == "real_time",
+                CopyJob.status == "running",
+            )
+        )
+        return list(result.scalars().all())
+
     async def count_historical_jobs_today(self, user_id: int) -> int:
         """Count historical jobs created today by user."""
         from sqlalchemy import func

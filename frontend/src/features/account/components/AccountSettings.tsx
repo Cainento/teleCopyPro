@@ -1,9 +1,8 @@
 import { motion } from 'framer-motion';
-import { User, Phone, LogOut, Settings, CreditCard, Loader2 } from 'lucide-react';
+import { User, Phone, LogOut, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuthStore } from '@/store/auth.store';
-import { useSessionStore } from '@/store/session.store';
 import { useAccount } from '../hooks/useAccount';
 import { PlanCard } from './PlanCard';
 import { UsageStats } from './UsageStats';
@@ -12,11 +11,11 @@ import { toast } from 'sonner';
 import { ROUTES } from '@/lib/constants';
 import { telegramApi } from '@/api/telegram.api';
 import { cn } from '@/lib/cn';
+import { SupportSection } from './SupportSection';
 
 export function AccountSettings() {
   const navigate = useNavigate();
-  const logout = useAuthStore((state) => state.logout);
-  const sessionData = useSessionStore((state) => state.session);
+  const { logout, session: sessionData } = useAuthStore();
   const { accountData, limits, usage, isLoading } = useAccount();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -141,6 +140,11 @@ export function AccountSettings() {
         />
       </motion.div>
 
+      {/* Support Section - Only for PREMIUM and ENTERPRISE */}
+      {(accountData.plan === 'PREMIUM' || accountData.plan === 'ENTERPRISE') && (
+        <SupportSection />
+      )}
+
       {/* Usage Stats */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -154,6 +158,7 @@ export function AccountSettings() {
           currentPlan={accountData.plan}
         />
       </motion.div>
+
 
       {/* Upgrade Plans - Only show for FREE and PREMIUM users */}
       {accountData.plan !== 'ENTERPRISE' && (
