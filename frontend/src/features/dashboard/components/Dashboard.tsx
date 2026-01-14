@@ -7,6 +7,7 @@ import { AlertCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/lib/constants';
 import { useAuthStore } from '@/store/auth.store';
+import { DashboardExpiryAlert } from './DashboardExpiryAlert';
 
 // Get greeting based on time
 function getGreeting(): string {
@@ -109,6 +110,9 @@ export function Dashboard() {
           <RecentJobs jobs={recentJobs} isLoading={isLoading} />
         </motion.div>
       </div>
+
+      {/* Expiry Alert Popup */}
+      <DashboardExpiryAlert />
     </div>
   );
 }

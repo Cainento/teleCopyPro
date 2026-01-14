@@ -28,6 +28,8 @@ export interface AccountInfoResponse {
   display_name: string | null;
   plan: 'free' | 'premium' | 'enterprise';
   plan_expiry: string | null;
+  stripe_subscription_id: string | null;
+  subscription_status: string | null;
   usage_count: number;
   created_at: string | null;
   is_admin: boolean;

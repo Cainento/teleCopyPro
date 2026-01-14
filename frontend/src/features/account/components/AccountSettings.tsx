@@ -12,12 +12,60 @@ import { ROUTES } from '@/lib/constants';
 import { telegramApi } from '@/api/telegram.api';
 import { cn } from '@/lib/cn';
 import { SupportSection } from './SupportSection';
+import { SubscriptionManagement } from './SubscriptionManagement';
+
+import { useLocation } from 'react-router-dom';
+import { verifySession } from '@/api/stripe.api';
+import { useEffect } from 'react';
+
+// ... imports
 
 export function AccountSettings() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { logout, session: sessionData } = useAuthStore();
-  const { accountData, limits, usage, isLoading } = useAccount();
+  const { accountData, limits, usage, isLoading, refetch } = useAccount();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+
+  // Check for payment success and verify session
+  useEffect(() => {
+    const verifyPayment = async () => {
+      const params = new URLSearchParams(location.search);
+      const paymentStatus = params.get('payment');
+      const sessionId = params.get('session_id');
+
+      if (paymentStatus === 'success' && sessionId) {
+        setIsVerifying(true);
+        try {
+          console.log('Verifying payment session:', sessionId);
+          const result = await verifySession(sessionId);
+
+          if (result.verified) {
+            toast.success('Pagamento confirmado! Sua assinatura está ativa.');
+            // Refetch account data to update UI
+            await refetch();
+          } else {
+            toast.warning('Pagamento não confirmado ainda. Verifique novamente em instantes.');
+          }
+        } catch (error) {
+          console.error('Error verifying payment:', error);
+          toast.error('Erro ao verificar pagamento.');
+        } finally {
+          setIsVerifying(false);
+          // Clean URL
+          navigate(location.pathname, { replace: true });
+        }
+      } else if (paymentStatus === 'success' && !sessionId) {
+        // Fallback for when session_id is missing (legacy flow)
+        toast.info('Pagamento recebido. Atualizando status...');
+        setTimeout(() => refetch(), 2000);
+        navigate(location.pathname, { replace: true });
+      }
+    };
+
+    verifyPayment();
+  }, [location, navigate, refetch]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -139,6 +187,17 @@ export function AccountSettings() {
           expiryDate={accountData.planExpiry}
         />
       </motion.div>
+
+      {/* Subscription Management */}
+      {(accountData.plan === 'PREMIUM' || accountData.plan === 'ENTERPRISE') && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+        >
+          <SubscriptionManagement accountData={accountData} />
+        </motion.div>
+      )}
 
       {/* Support Section - Only for PREMIUM and ENTERPRISE */}
       {(accountData.plan === 'PREMIUM' || accountData.plan === 'ENTERPRISE') && (

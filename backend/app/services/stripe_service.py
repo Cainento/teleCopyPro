@@ -254,51 +254,54 @@ class StripeService:
             user.stripe_subscription_id = subscription.id
 
             # Calculate subscription period end
-            # Handle both attribute access and dictionary access for Stripe objects
-            current_period_end = getattr(subscription, 'current_period_end', None)
-            if current_period_end is None and hasattr(subscription, 'get'):
-                current_period_end = subscription.get('current_period_end')
-            if current_period_end:
-                user.subscription_period_end = datetime.fromtimestamp(current_period_end)
+            # Stripe objects require direct attribute access, not getattr()
+            try:
+                current_period_end = subscription.current_period_end
+                if current_period_end:
+                    user.subscription_period_end = datetime.utcfromtimestamp(current_period_end)
+                    logger.info(f"Stripe current_period_end (ts={current_period_end}) converted to {user.subscription_period_end} (UTC)")
+                else:
+                    logger.warning(f"current_period_end is None/0 for subscription {subscription.id}")
+            except (AttributeError, KeyError, TypeError) as e:
+                logger.warning(f"Could not access current_period_end for subscription {subscription.id}: {e}")
 
             # Determine plan based on price ID
-            # Access items data safely - Stripe subscription.items could be a method or attribute
-            items = None
-            if hasattr(subscription, 'items'):
-                items_attr = getattr(subscription, 'items')
-                # Check if it's a method and call it, or if it's already data
-                if callable(items_attr):
-                    # It's a method like dict.items(), don't call it
-                    # Instead try to access as dict
-                    if hasattr(subscription, 'get'):
-                        items = subscription.get('items')
-                elif items_attr is not None:
-                    items = items_attr
-            elif hasattr(subscription, 'get'):
-                items = subscription.get('items')
-
-            items_data = None
-            if items is not None:
-                items_data = getattr(items, 'data', None)
-                if items_data is None and hasattr(items, 'get'):
-                    items_data = items.get('data')
+            # Safe extraction of items
+            items_data = []
+            try:
+                # Try attribute access first (Stripe object)
+                if hasattr(subscription, 'items') and hasattr(subscription.items, 'data'):
+                    items_data = subscription.items.data
+                # Try dictionary access
+                elif isinstance(subscription, dict) or hasattr(subscription, 'get'):
+                    items = subscription.get('items', {})
+                    if hasattr(items, 'data'):
+                         items_data = items.data
+                    elif isinstance(items, dict):
+                        items_data = items.get('data', [])
+            except Exception as e:
+                logger.warning(f"Error accessing items data: {e}. Subscription object type: {type(subscription)}")
 
             price_id = None
             if items_data and len(items_data) > 0:
                 first_item = items_data[0]
-                price = getattr(first_item, 'price', None)
-                if price is None and hasattr(first_item, 'get'):
-                    price = first_item.get('price')
-
-                if price:
-                    price_id = getattr(price, 'id', None)
-                    if price_id is None and hasattr(price, 'get'):
-                        price_id = price.get('id')
+                try:
+                    # Try attribute access for price
+                    if hasattr(first_item, 'price') and hasattr(first_item.price, 'id'):
+                        price_id = first_item.price.id
+                    # Try dictionary access
+                    elif isinstance(first_item, dict) or hasattr(first_item, 'get'):
+                        price_obj = first_item.get('price', {})
+                        if hasattr(price_obj, 'id'):
+                            price_id = price_obj.id
+                        elif isinstance(price_obj, dict):
+                            price_id = price_obj.get('id')
+                    
                     logger.info(f"Extracted price_id: {price_id} from subscription {subscription.id}")
-                else:
-                    logger.warning(f"Could not extract price from subscription {subscription.id}")
+                except Exception as e:
+                    logger.warning(f"Error extracting price ID: {e}")
             else:
-                logger.warning(f"No items_data found for subscription {subscription.id}. items={items}, items_data={items_data}")
+                 logger.warning(f"No items_data found for subscription {subscription.id}")
 
             if price_id:
                 logger.info(f"Checking price_id {price_id} against premium={settings.stripe_premium_monthly_price_id}, {settings.stripe_premium_annual_price_id}")
@@ -509,3 +512,34 @@ class StripeService:
         elif plan == UserPlan.ENTERPRISE:
             return settings.stripe_enterprise_annual_price_id if is_annual else settings.stripe_enterprise_monthly_price_id
         return None
+
+    async def verify_checkout_session(self, session_id: str) -> bool:
+        """
+        Manually verify a checkout session from Stripe.
+        Useful for when webhooks fail (e.g. localhost without tunnel).
+
+        Args:
+            session_id: Stripe Checkout Session ID
+
+        Returns:
+            True if session is paid and processed, False otherwise
+        """
+        try:
+            # Retrieve session from Stripe
+            session = stripe.checkout.Session.retrieve(session_id)
+            
+            if session.payment_status == 'paid':
+                logger.info(f"Manually verifying paid session {session_id}")
+                await self.handle_checkout_completed(session)
+                return True
+            else:
+                logger.warning(f"Session {session_id} is not paid. Status: {session.payment_status}")
+                return False
+                
+        except stripe.error.StripeError as e:
+            logger.error(f"Error retrieving session {session_id}: {e}")
+            raise TeleCopyException(f"Failed to verify session: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error verifying session {session_id}: {e}", exc_info=True)
+            raise
+

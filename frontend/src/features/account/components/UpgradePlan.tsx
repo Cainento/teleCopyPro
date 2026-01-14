@@ -14,7 +14,7 @@ interface UpgradePlanProps {
     onPlanUpdated?: () => void;
 }
 
-interface PlanOption {
+export interface PlanOption {
     id: Plan;
     name: string;
     monthlyPrice: string;
@@ -29,7 +29,7 @@ interface PlanOption {
     features: Array<{ text: string; included: boolean }>;
 }
 
-const PLANS: PlanOption[] = [
+export const PLANS: PlanOption[] = [
     {
         id: 'FREE' as Plan,
         name: 'Gratuito',

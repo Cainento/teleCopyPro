@@ -71,6 +71,16 @@ export async function getSubscriptionStatus(): Promise<SubscriptionStatus> {
 }
 
 /**
+ * Verify checkout session status
+ */
+export async function verifySession(sessionId: string): Promise<{ verified: boolean; message: string }> {
+  const response = await apiClient.post<{ verified: boolean; message: string }>(
+    `/api/stripe/verify-session/${sessionId}`
+  );
+  return response.data;
+}
+
+/**
  * Price IDs for different subscription plans
  * These should match the Stripe Price IDs configured in the backend
  */
@@ -92,7 +102,7 @@ export async function redirectToCheckout(
   const baseUrl = window.location.origin;
   const response = await createCheckoutSession({
     price_id: priceId,
-    success_url: successUrl || `${baseUrl}/account?payment=success`,
+    success_url: successUrl || `${baseUrl}/account?payment=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: cancelUrl || `${baseUrl}/account?payment=cancelled`,
   });
 

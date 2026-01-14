@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '@/store/auth.store';
 import { userApi, type AccountInfoResponse, type UsageStatsResponse } from '@/api/user.api';
 import { toast } from 'sonner';
 
+// ... (Plan type and interfaces remain the same)
 
 export type Plan = 'FREE' | 'PREMIUM' | 'ENTERPRISE';
 
@@ -12,6 +13,8 @@ export interface AccountData {
   username?: string;
   plan: Plan;
   planExpiry?: string;
+  stripeSubscriptionId?: string;
+  subscriptionStatus?: string;
 }
 
 export interface PlanLimits {
@@ -52,32 +55,31 @@ export function useAccount() {
   const [accountInfo, setAccountInfo] = useState<AccountInfoResponse | null>(null);
   const [usageStats, setUsageStats] = useState<UsageStatsResponse | null>(null);
 
-  // Fetch account data and usage stats from backend
-  useEffect(() => {
-    const fetchAccountData = async () => {
-      if (!session?.phoneNumber) {
-        setIsLoading(false);
-        return;
-      }
+  const fetchAccountData = useCallback(async () => {
+    if (!session?.phoneNumber) {
+      setIsLoading(false);
+      return;
+    }
 
-      try {
-        setIsLoading(true);
-        const [accountData, usageData] = await Promise.all([
-          userApi.getAccountInfo(session.phoneNumber),
-          userApi.getUsageStats(session.phoneNumber),
-        ]);
-        setAccountInfo(accountData);
-        setUsageStats(usageData);
-      } catch (error: any) {
-        console.error('Error fetching account data:', error);
-        toast.error('Erro ao carregar dados da conta');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchAccountData();
+    try {
+      setIsLoading(true);
+      const [accountData, usageData] = await Promise.all([
+        userApi.getAccountInfo(session.phoneNumber),
+        userApi.getUsageStats(session.phoneNumber),
+      ]);
+      setAccountInfo(accountData);
+      setUsageStats(usageData);
+    } catch (error: any) {
+      console.error('Error fetching account data:', error);
+      toast.error('Erro ao carregar dados da conta');
+    } finally {
+      setIsLoading(false);
+    }
   }, [session?.phoneNumber]);
+
+  useEffect(() => {
+    fetchAccountData();
+  }, [fetchAccountData]);
 
   // Convert lowercase plan from API to uppercase for UI
   const planFromApi = accountInfo?.plan || 'free';
@@ -89,6 +91,8 @@ export function useAccount() {
     username: accountInfo?.display_name || session?.username,
     plan: planUppercase,
     planExpiry: accountInfo?.plan_expiry || undefined,
+    stripeSubscriptionId: accountInfo?.stripe_subscription_id || undefined,
+    subscriptionStatus: accountInfo?.subscription_status || undefined,
 
   };
 
@@ -145,5 +149,6 @@ export function useAccount() {
     limits,
     usage,
     isLoading,
+    refetch: fetchAccountData,
   };
 }

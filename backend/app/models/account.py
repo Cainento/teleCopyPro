@@ -16,6 +16,8 @@ class AccountInfoResponse(BaseModel):
     display_name: Optional[str] = Field(None, description="User's display name")
     plan: UserPlan = Field(..., description="Current plan type")
     plan_expiry: Optional[datetime] = Field(None, description="Plan expiration date")
+    stripe_subscription_id: Optional[str] = Field(None, description="Stripe subscription ID")
+    subscription_status: Optional[str] = Field(None, description="Subscription status")
     usage_count: int = Field(default=0, ge=0, description="Number of copy operations used")
     created_at: Optional[datetime] = Field(None, description="Account creation date")
     is_admin: bool = Field(default=False, description="Whether the user has admin privileges")

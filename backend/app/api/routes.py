@@ -822,6 +822,8 @@ async def get_account_info(
             display_name=user.name,
             plan=user.plan,
             plan_expiry=user.plan_expiry,
+            stripe_subscription_id=user.stripe_subscription_id,
+            subscription_status=user.subscription_status,
             usage_count=user.usage_count,
             created_at=user.created_at,
             is_admin=user.is_admin
@@ -1114,8 +1116,8 @@ async def cancel_subscription(
         data = await request.json()
         immediately = data.get("immediately", False)
 
-        # Get user from database
-        user_db = await user_service.get_user_by_phone(current_user.phone_number)
+        # Get user from database - use user_repo directly to get the DB model (not Pydantic)
+        user_db = await user_service.user_repo.get_by_phone(current_user.phone_number)
         if not user_db:
             raise NotFoundError("Usuário não encontrado.")
 
@@ -1131,12 +1133,28 @@ async def cancel_subscription(
         if not success:
             raise TeleCopyException("Falha ao cancelar assinatura.", 500)
 
+        # Update user's subscription status in database to reflect the change
+        if immediately:
+            # Cancelled immediately - clear subscription data
+            user_db.subscription_status = "canceled"
+            user_db.stripe_subscription_id = None
+            user_db.plan = UserPlan.FREE
+            user_db.plan_expiry = None
+        else:
+            # Scheduled for cancellation at period end - mark as pending cancellation
+            # Stripe still says 'active' but cancel_at_period_end is True
+            user_db.subscription_status = "canceling"  # Custom status to indicate pending cancellation
+        
+        await user_service.db.commit()
+        logger.info(f"Updated user {user_db.id} subscription_status to {'canceled' if immediately else 'canceling'}")
+
         message = "Assinatura cancelada imediatamente" if immediately else "Assinatura será cancelada ao final do período"
 
         return JSONResponse(
             content={
                 "message": message,
-                "immediately": immediately
+                "immediately": immediately,
+                "subscription_status": user_db.subscription_status
             },
             status_code=200
         )
@@ -1188,11 +1206,48 @@ async def get_subscription_status(
             status_code=200
         )
 
-    except NotFoundError as e:
-        raise TeleCopyException(str(e), 404)
     except Exception as e:
         logger.error(f"Error in get_subscription_status: {e}", exc_info=True)
         raise TeleCopyException(f"Erro interno ao obter status da assinatura: {str(e)}", 500)
+
+
+@stripe_router.post("/verify-session/{session_id}")
+async def verify_session(
+    session_id: str,
+    current_user: PydanticUser = Depends(get_current_user),
+    stripe_service: StripeService = Depends(get_stripe_service),
+):
+    """
+    Manually verify a checkout session key when webhooks fail.
+    
+    Path parameters:
+        - session_id: str (Stripe Checkout Session ID)
+        
+    Returns:
+        JSON with verification status
+    """
+    try:
+        is_paid = await stripe_service.verify_checkout_session(session_id)
+        
+        return JSONResponse(
+            content={
+                "verified": is_paid,
+                "session_id": session_id,
+                "message": "Sessão verificada com sucesso" if is_paid else "Sessão não paga ou inválida"
+            },
+            status_code=200
+        )
+    except Exception as e:
+        logger.error(f"Error in verify_session: {e}", exc_info=True)
+        # Don't expose internal errors, just return failed verification
+        return JSONResponse(
+            content={
+                "verified": False,
+                "session_id": session_id,
+                "message": f"Erro ao verificar sessão: {str(e)}"
+            },
+            status_code=200 
+        )
 
 
 # ==================== Webhook Routes ====================
@@ -1236,7 +1291,9 @@ async def stripe_webhook(
             logger.error(f"Invalid webhook payload: {e}")
             raise TeleCopyException("Invalid payload", 400)
         except stripe.error.SignatureVerificationError as e:
-            logger.error(f"Invalid webhook signature: {e}")
+            # Log more details about the failure
+            secret_preview = f"{settings.stripe_webhook_secret[:5]}...{settings.stripe_webhook_secret[-5:]}" if settings.stripe_webhook_secret else "None"
+            logger.error(f"Invalid webhook signature: {e}. Webhook Secret configured: {secret_preview}. Signature Header: {stripe_signature[:20]}...")
             raise TeleCopyException("Invalid signature", 400)
 
         logger.info(f"Received Stripe webhook event: {event['type']}")

@@ -124,12 +124,20 @@ class PagBankService:
             expiration_date = datetime.utcnow() + timedelta(hours=24)
             expiration_str = expiration_date.strftime("%Y-%m-%dT%H:%M:%S-03:00")
 
+            # Prepare customer email (handle sandbox conflict)
+            customer_email = user.email
+            if settings.pagbank_environment == "sandbox" and customer_email:
+                # Prevent "buyer email must not be equals to merchant email" in sandbox
+                if "@" in customer_email:
+                    local, domain = customer_email.split("@")
+                    customer_email = f"{local}+sb@{domain}"
+
             # Build request payload following PagBank Order API spec
             payload = {
                 "reference_id": reference_id,
                 "customer": {
                     "name": user.name or "Cliente TeleCopy",
-                    "email": user.email,
+                    "email": customer_email,
                     "tax_id": user.tax_id,
                     "phones": [
                         {
@@ -347,11 +355,15 @@ class PagBankService:
                 logger.error(f"User {pix_payment.user_id} not found for PIX payment")
                 return
 
-            # Calculate plan expiry based on billing cycle
+            # Calculate plan expiry based on billing cycle (extend if active, start new if expired)
+            start_date = datetime.utcnow()
+            if user.plan_expiry and user.plan_expiry > start_date:
+                start_date = user.plan_expiry
+
             if pix_payment.billing_cycle == "annual":
-                plan_expiry = datetime.utcnow() + timedelta(days=365)
+                plan_expiry = start_date + timedelta(days=365)
             else:
-                plan_expiry = datetime.utcnow() + timedelta(days=30)
+                plan_expiry = start_date + timedelta(days=30)
 
             # Update user plan
             user.plan = pix_payment.plan

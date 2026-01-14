@@ -250,8 +250,15 @@ class UserService:
         if user.plan == UserPlan.FREE:
             return False  # Free plan doesn't expire
 
+        # For Stripe subscriptions: if subscription is active, plan is NOT expired
+        # (Stripe subscriptions are recurring and don't rely on plan_expiry)
+        if user.subscription_status == "active":
+            return False
+
+        # For one-time payments (PIX): check plan_expiry date
         if not user.plan_expiry:
-            return True  # No expiry date means expired
+            # No expiry date AND no active subscription means expired
+            return True
 
         return datetime.utcnow() > user.plan_expiry
 
