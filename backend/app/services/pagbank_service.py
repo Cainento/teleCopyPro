@@ -386,6 +386,12 @@ class PagBankService:
             # Update user plan
             user.plan = pix_payment.plan
             user.plan_expiry = plan_expiry
+            
+            # Clear Stripe subscription data as Pix is now the active payment method
+            # This prevents the frontend from displaying "Recurring Subscription" or "Canceling"
+            user.stripe_subscription_id = None
+            user.subscription_status = None
+            user.subscription_period_end = None
 
             await self.db.flush()
 
