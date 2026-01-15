@@ -47,8 +47,10 @@ class SessionService:
         user_id: int,
         phone_number: str,
         api_id: int,
+        api_id: int,
         api_hash: str,
-        db: AsyncSession
+        db: AsyncSession,
+        session_file_path: Optional[str] = None
     ) -> None:
         """
         Create or update a session record in the database to persist API credentials.
@@ -59,6 +61,7 @@ class SessionService:
             api_id: Telegram API ID
             api_hash: Telegram API Hash
             db: Database session
+            session_file_path: Optional specific session file path to use (if different from default)
         """
         session_repo = self._get_session_repo(db)
 
@@ -68,24 +71,41 @@ class SessionService:
             
             if existing_session:
                 # Update existing session with new credentials if they changed
+                # Also update session_file_path if provided (e.g. for unique timestamped sessions)
+                updated = False
+                
                 if existing_session.api_id != str(api_id) or existing_session.api_hash != api_hash:
                     existing_session.api_id = str(api_id)
                     existing_session.api_hash = api_hash
+                    updated = True
+                
+                if session_file_path and existing_session.session_file_path != session_file_path:
+                    existing_session.session_file_path = session_file_path
+                    updated = True
+                
+                if updated:
                     existing_session.is_active = True
                     await session_repo.update_last_used(existing_session)
-                    logger.info(f"Updated session credentials in database for {phone_number}")
+                    logger.info(f"Updated session credentials/path in database for {phone_number}")
                 else:
-                    # Credentials haven't changed, no need to update last_used here
-                    # as it's already handled by the auth middleware more efficiently
-                    logger.debug(f"Session credentials unchanged for {phone_number}")
+                    # Credentials haven't changed, but verify is_active
+                    if not existing_session.is_active:
+                         existing_session.is_active = True
+                         await session_repo.update_last_used(existing_session)
+                         logger.info(f"Reactivated existing session for {phone_number}")
+                    else:
+                        logger.debug(f"Session credentials unchanged for {phone_number}")
             else:
                 # Create new session record
-                session_name = self._telegram_service._get_session_name(phone_number, api_id, api_hash)
-                session_path = self._telegram_service._get_session_path(session_name)
+                if not session_file_path:
+                    session_name = self._telegram_service._get_session_name(phone_number, api_id, api_hash)
+                    session_path = self._telegram_service._get_session_path(session_name)
+                    session_file_path = str(session_path)
+                
                 await session_repo.create(
                     user_id=user_id,
                     phone_number=phone_number,
-                    session_file_path=str(session_path),
+                    session_file_path=session_file_path,
                     api_id=str(api_id),
                     api_hash=api_hash
                 )

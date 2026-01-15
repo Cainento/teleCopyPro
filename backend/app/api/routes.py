@@ -205,7 +205,8 @@ async def sign_in(
                     phone_number=phone_number,
                     api_id=api_id,
                     api_hash=api_hash,
-                    db=db
+                    db=db,
+                    session_file_path=session_file_path
                 )
                 logger.info(f"Session credentials saved to database for {phone_number}")
             except Exception as db_err:
@@ -309,7 +310,8 @@ async def sign_in_2fa(
                 phone_number=phone_number,
                 api_id=api_id,
                 api_hash=api_hash,
-                db=db
+                db=db,
+                session_file_path=session_file_path
             )
             logger.info(f"Session credentials saved to database for {phone_number}")
         except Exception as db_err:

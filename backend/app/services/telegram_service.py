@@ -231,7 +231,20 @@ class TelegramService:
             path_obj = Path(session_file_path)
             session_name = path_obj.stem
         else:
-            session_name = self._get_session_name(phone_number, api_id, api_hash)
+            # Try to look up unique session path from database first
+            session_repo = self._get_session_repo(db)
+            try:
+                db_session = await session_repo.get_by_phone(phone_number)
+                if db_session and db_session.session_file_path:
+                    # Use the stored session path (which might be a unique timestamped one)
+                    path_obj = Path(db_session.session_file_path)
+                    session_name = path_obj.stem
+                    logger.debug(f"[GET_OR_CREATE_CLIENT] Found stored session path for {phone_number}: {session_name}")
+                else:
+                    session_name = self._get_session_name(phone_number, api_id, api_hash)
+            except Exception as e:
+                logger.warning(f"[GET_OR_CREATE_CLIENT] Error looking up session in DB: {e}")
+                session_name = self._get_session_name(phone_number, api_id, api_hash)
         
         async with self._get_lock(session_name):
             logger.debug(f"[GET_OR_CREATE_CLIENT] Session name: {session_name} (Lock acquired)")
