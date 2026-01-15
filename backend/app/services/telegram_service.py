@@ -210,7 +210,8 @@ class TelegramService:
         phone_number: str,
         api_id: int,
         api_hash: str,
-        db: AsyncSession
+        db: AsyncSession,
+        session_file_path: Optional[str] = None
     ) -> TelegramClient:
         """
         Get existing client or create a new one.
@@ -220,11 +221,17 @@ class TelegramService:
             api_id: Telegram API ID
             api_hash: Telegram API Hash
             db: Database session
+            session_file_path: Optional specific session file path to use
 
         Returns:
             TelegramClient instance
         """
-        session_name = self._get_session_name(phone_number, api_id, api_hash)
+        if session_file_path:
+            # Extract session name from path (filename without extension)
+            path_obj = Path(session_file_path)
+            session_name = path_obj.stem
+        else:
+            session_name = self._get_session_name(phone_number, api_id, api_hash)
         
         async with self._get_lock(session_name):
             logger.debug(f"[GET_OR_CREATE_CLIENT] Session name: {session_name} (Lock acquired)")
@@ -325,20 +332,32 @@ class TelegramService:
                     if client.is_connected():
                         await client.disconnect()
                     
-                    await self.logout(phone_number, db, api_id, api_hash)
-                    logger.info(f"Successfully logged out {phone_number}, recreating client for new authentication")
+                    file_deleted = await self.logout(phone_number, db, api_id, api_hash)
+                    logger.info(f"Auto-logout result for {phone_number}: file_deleted={file_deleted}")
+
+                    server_session_name = None
+                    if not file_deleted:
+                        # File locked, use unique session name
+                        import time
+                        timestamp = int(time.time())
+                        server_session_name = f"{self._get_session_name(phone_number, api_id, api_hash)}_{timestamp}"
+                        logger.warning(f"Session file locked, using unique session name: {server_session_name}")
 
                     # Recreate client for fresh authentication
                     client = await self.create_client(
                         api_id,
                         api_hash,
-                        phone_number=phone_number
+                        phone_number=phone_number,
+                        session_name=server_session_name
                     )
                     await client.connect()
                 except Exception as logout_error:
                     logger.error(f"Error during auto-logout for {phone_number}: {logout_error}", exc_info=True)
-                    if not client.is_connected():
-                        await client.connect()
+                    # Use specific error message if it's a SessionError
+                    msg = str(logout_error)
+                    if "WinError 32" in msg:
+                         msg = "O arquivo de sessão está bloqueado por outro processo. Tente novamente em alguns segundos."
+                    raise TelegramAPIError(f"Erro ao reiniciar sessão: {msg}")
 
             # Send verification code
             result = await client.send_code_request(phone_number)
@@ -609,7 +628,7 @@ class TelegramService:
                 del self._active_clients[session_name]
                 logger.info(f"Disconnected client session {session_name}")
 
-    async def logout(self, phone_number: str, db: AsyncSession, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> None:
+    async def logout(self, phone_number: str, db: AsyncSession, api_id: Optional[int] = None, api_hash: Optional[str] = None) -> bool:
         """
         Logout user by disconnecting Telegram client and deleting session file.
 
@@ -618,6 +637,9 @@ class TelegramService:
             db: Database session
             api_id: Telegram API ID (optional)
             api_hash: Telegram API Hash (optional)
+
+        Returns:
+            bool: True if session file was deleted or didn't exist, False if file remains (locked)
 
         Raises:
             SessionError: If session doesn't exist
@@ -657,11 +679,35 @@ class TelegramService:
                 del self._session_credentials[session_name]
 
             # Delete session file
+            # Delete session file with retry logic for Windows
+            file_deleted = True
             if session_path.exists():
-                session_path.unlink()
-                logger.info(f"Deleted session file: {session_path}")
+                max_retries = 5
+                retry_delay = 0.5
+                
+                for attempt in range(max_retries):
+                    try:
+                        session_path.unlink()
+                        logger.info(f"Deleted session file: {session_path}")
+                        file_deleted = True
+                        break
+                    except PermissionError:
+                        file_deleted = False
+                        if attempt < max_retries - 1:
+                            logger.warning(f"File locked, retrying deletion in {retry_delay}s: {session_path}")
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            logger.error(f"Failed to delete session file after {max_retries} attempts: {session_path}")
+                            # Don't raise here, just log error, as we might still want to proceed
+                            # removing from DB
+                    except Exception as e:
+                        logger.warning(f"Error deleting session file: {e}")
+                        file_deleted = False
+                        break
             else:
                 logger.warning(f"Session file not found: {session_path}")
+                file_deleted = True
 
             # Deactivate session in database
             session_repo = self._get_session_repo(db)
@@ -679,9 +725,10 @@ class TelegramService:
                     pass
 
             logger.info(f"Logout successful for {phone_number}")
+            return file_deleted
 
         except Exception as e:
-            logger.error(f"Error during logout for {phone_number}: {e}", exc_info=True)
+            logger.error(f"Error during auto-logout for {phone_number}: {e}", exc_info=True)
             raise SessionError(f"Erro ao fazer logout: {str(e)}")
 
     async def cleanup(self) -> None:

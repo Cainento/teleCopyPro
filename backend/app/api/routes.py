@@ -112,20 +112,24 @@ async def send_code(
         except (ValueError, TypeError):
             raise TeleCopyException(f"API ID inválido: deve ser um número inteiro.", 400)
 
-        # Remove existing temporary session if any to avoid database locks
-        existing_temp = await session_service.get_temp_session(phone_number)
+        # Remove existing temporary session if any
+        existing_temp = await session_service.get_temp_session(phone_number, db)
         if existing_temp:
             logger.info(f"Removing existing temporary session for {phone_number} before new send_code")
-            await session_service.remove_temp_session(phone_number)
+            await session_service.remove_temp_session(phone_number, db)
 
         # Send verification code
         client, phone_code_hash = await telegram_service.send_verification_code(
             phone_number, api_id, api_hash, db
         )
 
-        # Create temporary session
+        # Get actual session file path (might be unique if default was locked)
+        session_file_path = f"{client.session.filename}.session"
+
+        # Create temporary session in database (stores phone_code_hash for later use)
         await session_service.create_temp_session(
-            phone_number, api_id, api_hash, client, phone_code_hash
+            phone_number, api_id, api_hash, phone_code_hash, db,
+            session_file_path=session_file_path
         )
 
         return JSONResponse(
@@ -163,18 +167,23 @@ async def sign_in(
         if not all([phone_number, phone_code]):
             raise TeleCopyException("Número de telefone e código são obrigatórios.", 400)
 
-        # Get temporary session
-        temp_session = await session_service.get_temp_session(phone_number)
+        # Get temporary session from database
+        temp_session = await session_service.get_temp_session(phone_number, db)
         if not temp_session:
             raise TeleCopyException(
                 "Sessão de login expirada ou não iniciada. Por favor, solicite o código novamente.",
                 400
             )
 
-        client = temp_session["client"]
         phone_code_hash = temp_session["phone_code_hash"]
         api_id = temp_session["api_id"]
         api_hash = temp_session["api_hash"]
+        session_file_path = temp_session.get("session_file_path")
+
+        # Recreate client from session file (session file was created during send_code)
+        client = await telegram_service.get_or_create_client(
+            phone_number, api_id, api_hash, db, session_file_path=session_file_path
+        )
 
         # Verify code
         try:
@@ -182,8 +191,8 @@ async def sign_in(
                 client, phone_number, phone_code, phone_code_hash
             )
 
-            # Remove temporary session (login successful)
-            await session_service.remove_temp_session(phone_number, disconnect=False)
+            # Remove temporary session from database (login successful)
+            await session_service.remove_temp_session(phone_number, db)
 
             # Get or create user in database
             display_name = user_info.get("username") or user_info.get("first_name")
@@ -266,23 +275,28 @@ async def sign_in_2fa(
         if not all([phone_number, password]):
             raise TeleCopyException("Número de telefone e senha são obrigatórios.", 400)
 
-        # Get temporary session
-        temp_session = await session_service.get_temp_session(phone_number)
+        # Get temporary session from database
+        temp_session = await session_service.get_temp_session(phone_number, db)
         if not temp_session:
             raise TeleCopyException(
                 "Sessão de login expirada ou não iniciada. Por favor, solicite o código novamente.",
                 400
             )
 
-        client = temp_session["client"]
         api_id = temp_session["api_id"]
         api_hash = temp_session["api_hash"]
+        session_file_path = temp_session.get("session_file_path")
+
+        # Recreate client from session file (session was created during send_code)
+        client = await telegram_service.get_or_create_client(
+            phone_number, api_id, api_hash, db, session_file_path=session_file_path
+        )
 
         # Verify 2FA password
         user_info = await telegram_service.verify_2fa_password(client, password, phone_number)
 
-        # Remove temporary session
-        await session_service.remove_temp_session(phone_number, disconnect=False)
+        # Remove temporary session from database
+        await session_service.remove_temp_session(phone_number, db)
 
         # Get or create user in database
         display_name = user_info.get("username") or user_info.get("first_name")

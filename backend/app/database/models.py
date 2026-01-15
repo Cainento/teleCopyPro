@@ -212,3 +212,35 @@ class PixPayment(Base):
 
     def __repr__(self):
         return f"<PixPayment(id={self.order_id}, user={self.user_id}, status={self.status})>"
+
+
+class TempAuthSession(Base):
+    """Temporary authentication session for multi-step Telegram auth flow.
+    
+    This table stores temporary auth state during the send_code -> sign_in -> sign_in_2fa flow.
+    It replaces the in-memory _temp_sessions dict to work properly in multi-machine deployments.
+    """
+
+    __tablename__ = "temp_auth_sessions"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    
+    # Session identification (phone number without formatting)
+    session_key = Column(String(50), unique=True, nullable=False, index=True)
+    phone_number = Column(String(50), nullable=False)
+    
+    # Telegram credentials
+    api_id = Column(String(100), nullable=False)
+    api_hash = Column(String(100), nullable=False)
+    
+    # Auth flow state
+    phone_code_hash = Column(String(255), nullable=False)  # Telegram's phone_code_hash for verification
+    session_file_path = Column(String(500), nullable=True)  # Path to .session file if created
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+
+    def __repr__(self):
+        return f"<TempAuthSession(key={self.session_key}, expires={self.expires_at})>"
+

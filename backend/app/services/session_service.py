@@ -10,15 +10,19 @@ from app.config import settings
 from app.core.exceptions import SessionError
 from app.core.logger import get_logger
 from app.database.repositories.session_repository import SessionRepository
+from app.database.repositories.temp_auth_repository import TempAuthRepository
 from app.models.session import TemporarySession
 from app.services.telegram_service import TelegramService
 
 logger = get_logger(__name__)
 
 
-
 class SessionService:
-    """Service for managing temporary authentication sessions."""
+    """Service for managing temporary authentication sessions.
+    
+    Temporary auth sessions are now stored in the database instead of in-memory
+    to support multi-machine deployments (e.g., Fly.io with multiple instances).
+    """
 
     def __init__(self, telegram_service: TelegramService):
         """
@@ -28,12 +32,15 @@ class SessionService:
             telegram_service: TelegramService instance
         """
         self._telegram_service = telegram_service
-        self._temp_sessions: dict[str, dict] = {}
         self._cleanup_task: Optional[asyncio.Task] = None
 
     def _get_session_repo(self, db: AsyncSession) -> SessionRepository:
         """Get SessionRepository with provided database session."""
         return SessionRepository(db)
+
+    def _get_temp_auth_repo(self, db: AsyncSession) -> TempAuthRepository:
+        """Get TempAuthRepository with provided database session."""
+        return TempAuthRepository(db)
 
     async def create_or_update_db_session(
         self,
@@ -87,38 +94,6 @@ class SessionService:
             logger.error(f"Error creating/updating session in database: {e}", exc_info=True)
             raise
 
-    def _start_cleanup_task(self) -> None:
-        """Start background task to clean up expired sessions."""
-        if self._cleanup_task is None or self._cleanup_task.done():
-            try:
-                loop = asyncio.get_running_loop()
-                self._cleanup_task = loop.create_task(self._cleanup_expired_sessions())
-            except RuntimeError:
-                # No running event loop, task will be started on first use
-                pass
-
-    async def _cleanup_expired_sessions(self) -> None:
-        """Periodically clean up expired temporary sessions."""
-        while True:
-            try:
-                await asyncio.sleep(60)  # Check every minute
-                current_time = datetime.utcnow()
-                expired_sessions = []
-
-                for session_key, session_data in self._temp_sessions.items():
-                    expires_at = session_data.get("expires_at")
-                    if expires_at and expires_at < current_time:
-                        expired_sessions.append(session_key)
-
-                for session_key in expired_sessions:
-                    await self.remove_temp_session(session_key)
-                    logger.debug(f"Removed expired session: {session_key}")
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in cleanup task: {e}", exc_info=True)
-
     def _get_session_key(self, phone_number: str) -> str:
         """
         Generate session key from phone number.
@@ -136,121 +111,142 @@ class SessionService:
         phone_number: str,
         api_id: int,
         api_hash: str,
-        client: object,
         phone_code_hash: str,
+        db: AsyncSession,
+        session_file_path: str,
         timeout: int = 300
     ) -> str:
         """
-        Create a temporary session for authentication flow.
+        Create a temporary session for authentication flow in the database.
 
         Args:
             phone_number: Phone number
             api_id: Telegram API ID
             api_hash: Telegram API Hash
-            client: TelegramClient instance
-            phone_code_hash: Phone code hash
+            phone_code_hash: Phone code hash from Telegram
+            db: Database session
             timeout: Session timeout in seconds (default: 5 minutes)
 
         Returns:
             Session key
         """
-        # Start cleanup task if not running
-        self._start_cleanup_task()
-
         session_key = self._get_session_key(phone_number)
         expires_at = datetime.utcnow() + timedelta(seconds=timeout)
+        
+        temp_auth_repo = self._get_temp_auth_repo(db)
+        
+        try:
+            # Upsert: create or update the temp auth session
+            await temp_auth_repo.upsert(
+                session_key=session_key,
+                phone_number=phone_number,
+                api_id=str(api_id),
+                api_hash=api_hash,
+                phone_code_hash=phone_code_hash,
+                session_file_path=session_file_path,
+                expires_at=expires_at,
+            )
+            await db.commit()
+            
+            logger.info(f"Created temporary session for {phone_number}, expires at {expires_at}")
+            return session_key
+            
+        except Exception as e:
+            logger.error(f"Error creating temp auth session in database: {e}", exc_info=True)
+            await db.rollback()
+            raise SessionError(f"Failed to create temp auth session: {str(e)}")
 
-        self._temp_sessions[session_key] = {
-            "phone_number": phone_number,
-            "api_id": api_id,
-            "api_hash": api_hash,
-            "client": client,
-            "phone_code_hash": phone_code_hash,
-            "created_at": datetime.utcnow(),
-            "expires_at": expires_at
-        }
-
-        logger.info(f"Created temporary session for {phone_number}, expires at {expires_at}")
-        logger.debug(f"Active sessions: {list(self._temp_sessions.keys())}")
-        return session_key
-
-    async def get_temp_session(self, phone_number: str) -> Optional[dict]:
+    async def get_temp_session(self, phone_number: str, db: AsyncSession) -> Optional[dict]:
         """
-        Get temporary session data.
+        Get temporary session data from the database.
 
         Args:
             phone_number: Phone number
+            db: Database session
 
         Returns:
-            Session data or None if not found/expired
+            Session data dict or None if not found/expired
         """
         session_key = self._get_session_key(phone_number)
         logger.info(f"Looking for session with key: {session_key}")
-        logger.debug(f"Active sessions: {list(self._temp_sessions.keys())}")
 
-        session_data = self._temp_sessions.get(session_key)
+        temp_auth_repo = self._get_temp_auth_repo(db)
+        
+        try:
+            session = await temp_auth_repo.get_by_key(session_key)
+            
+            if not session:
+                logger.warning(f"Session not found for {phone_number}")
+                return None
 
-        if not session_data:
-            logger.warning(f"Session not found for {phone_number}")
+            # Check if expired
+            current_time = datetime.utcnow()
+            logger.info(f"Session expires at: {session.expires_at}, current time: {current_time}")
+
+            if session.expires_at and session.expires_at < current_time:
+                logger.warning(f"Session expired for {phone_number}")
+                await self.remove_temp_session(phone_number, db)
+                return None
+
+            logger.info(f"Found valid session for {phone_number}")
+            
+            # Return dict format for compatibility with existing code
+            return {
+                "phone_number": session.phone_number,
+                "api_id": int(session.api_id),
+                "api_hash": session.api_hash,
+                "phone_code_hash": session.phone_code_hash,
+                "session_file_path": session.session_file_path,
+                "created_at": session.created_at,
+                "expires_at": session.expires_at,
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting temp auth session from database: {e}", exc_info=True)
             return None
 
-        # Check if expired
-        expires_at = session_data.get("expires_at")
-        current_time = datetime.utcnow()
-        logger.info(f"Session expires at: {expires_at}, current time: {current_time}")
-
-        if expires_at and expires_at < current_time:
-            logger.warning(f"Session expired for {phone_number}")
-            await self.remove_temp_session(phone_number)
-            return None
-
-        logger.info(f"Found valid session for {phone_number}")
-        return session_data
-
-    async def remove_temp_session(self, phone_number: str, disconnect: bool = True) -> None:
+    async def remove_temp_session(self, phone_number: str, db: AsyncSession) -> None:
         """
-        Remove temporary session.
+        Remove temporary session from the database.
 
         Args:
             phone_number: Phone number
-            disconnect: Whether to disconnect the client (default: True)
+            db: Database session
         """
         session_key = self._get_session_key(phone_number)
-        if session_key in self._temp_sessions:
-            session_data = self._temp_sessions[session_key]
-            
-            if disconnect:
-                client = session_data.get("client")
-                # Disconnect client if it exists
-                if client:
-                    try:
-                        if hasattr(client, "is_connected") and client.is_connected():
-                            await client.disconnect()
-                    except Exception as e:
-                        logger.warning(f"Error disconnecting temp session client: {e}")
+        temp_auth_repo = self._get_temp_auth_repo(db)
+        
+        try:
+            await temp_auth_repo.delete_by_key(session_key)
+            await db.commit()
+            logger.debug(f"Removed temporary session for {phone_number}")
+        except Exception as e:
+            logger.error(f"Error removing temp auth session from database: {e}", exc_info=True)
+            await db.rollback()
 
-            del self._temp_sessions[session_key]
-            logger.debug(f"Removed temporary session for {phone_number} (disconnect={disconnect})")
+    async def cleanup_expired_sessions(self, db: AsyncSession) -> int:
+        """
+        Clean up expired temporary sessions from the database.
+        
+        Args:
+            db: Database session
+            
+        Returns:
+            Number of sessions deleted
+        """
+        temp_auth_repo = self._get_temp_auth_repo(db)
+        
+        try:
+            deleted_count = await temp_auth_repo.delete_expired()
+            await db.commit()
+            if deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} expired temp auth sessions")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Error cleaning up expired sessions: {e}", exc_info=True)
+            await db.rollback()
+            return 0
 
     async def cleanup(self) -> None:
-        """Clean up all temporary sessions and stop cleanup task."""
-        if self._cleanup_task and not self._cleanup_task.done():
-            self._cleanup_task.cancel()
-            try:
-                await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
-
-        # Disconnect all temporary clients
-        for session_data in list(self._temp_sessions.values()):
-            client = session_data.get("client")
-            if client:
-                try:
-                    if hasattr(client, "is_connected") and client.is_connected():
-                        await client.disconnect()
-                except Exception as e:
-                    logger.warning(f"Error disconnecting client during cleanup: {e}")
-
-        self._temp_sessions.clear()
-        logger.info("Session service cleaned up")
-
+        """Clean up resources (legacy method for compatibility)."""
+        logger.info("Session service cleanup called (no-op in DB-backed mode)")
