@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+import re
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -44,6 +45,30 @@ class PagBankService:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+
+    def _parse_phone_number(self, phone: str) -> Optional[dict]:
+        """
+        Parse and validate a phone number for PagBank.
+        Only accepts valid Brazilian numbers (starting with 55).
+        Returns None for international or invalid numbers to avoid API errors.
+        """
+        if not phone:
+            return None
+            
+        # Remove non-digits
+        clean_phone = re.sub(r'\D', '', phone)
+        
+        # Check if it looks like a formatted Brazilian number (e.g. 5511999999999)
+        # Length 12 or 13 (55 + 2 DDD + 8/9 digits)
+        if clean_phone.startswith("55") and len(clean_phone) in [12, 13]:
+            return {
+                "country": "55",
+                "area": clean_phone[2:4],
+                "number": clean_phone[4:],
+                "type": "MOBILE" 
+            }
+            
+        return None
 
     def get_price_for_plan(self, plan: UserPlan, billing_cycle: str) -> int:
         """
@@ -139,14 +164,7 @@ class PagBankService:
                     "name": user.name or "Cliente TeleCopy",
                     "email": customer_email,
                     "tax_id": user.tax_id,
-                    "phones": [
-                        {
-                            "country": "55",
-                            "area": user.phone_number[3:5] if user.phone_number else "11",
-                            "number": user.phone_number[5:] if user.phone_number else "999999999",
-                            "type": "MOBILE"
-                        }
-                    ] if user.phone_number else []
+                    "phones": [self._parse_phone_number(user.phone_number)] if self._parse_phone_number(user.phone_number) else []
                 },
                 "items": [
                     {
@@ -173,8 +191,8 @@ class PagBankService:
             else:
                 logger.info("No valid webhook URL provided, relying on frontend polling for payment status")
 
-            # Remove empty phones array if no phone number
-            if not user.phone_number:
+            # Remove empty phones array if no valid phone number
+            if not payload["customer"]["phones"]:
                 del payload["customer"]["phones"]
 
             logger.info(f"Creating PIX order for user {user.id}, plan={plan.value}, billing_cycle={billing_cycle}")
