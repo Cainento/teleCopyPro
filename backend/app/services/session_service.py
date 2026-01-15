@@ -47,7 +47,7 @@ class SessionService:
         user_id: int,
         phone_number: str,
         api_id: int,
-        api_id: int,
+
         api_hash: str,
         db: AsyncSession,
         session_file_path: Optional[str] = None

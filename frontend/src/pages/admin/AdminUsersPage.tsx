@@ -83,6 +83,7 @@ export function AdminUsersPage() {
                             <thead className="bg-gray-50 dark:bg-gray-700">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Usuário</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Telefone</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Plano</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Uso</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Admin</th>
@@ -93,7 +94,7 @@ export function AdminUsersPage() {
                             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                                 {loading && !data ? (
                                     <tr>
-                                        <td colSpan={6} className="px-6 py-4 text-center">
+                                        <td colSpan={7} className="px-6 py-4 text-center">
                                             <div className="flex justify-center">
                                                 <LoadingSpinner />
                                             </div>
@@ -107,6 +108,9 @@ export function AdminUsersPage() {
                                                 <span className="text-sm text-gray-500 dark:text-gray-400">{user.email}</span>
                                                 <span className="text-xs text-gray-400">{user.id}</span>
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                            {user.phone_number}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 

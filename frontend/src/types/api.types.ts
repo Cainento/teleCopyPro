@@ -50,6 +50,7 @@ export interface User {
   created_at: string;
   updated_at: string;
   is_admin: boolean; // Added admin flag
+  phone_number: string;
 }
 
 // API Request Types
