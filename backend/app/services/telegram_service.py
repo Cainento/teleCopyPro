@@ -237,7 +237,11 @@ class TelegramService:
             logger.debug(f"[GET_OR_CREATE_CLIENT] Session name: {session_name} (Lock acquired)")
 
             # Check if session is expired (>7 days)
-            is_expired = await self._is_session_expired(phone_number, db)
+            # Skip check if we are loading a specific session file (e.g. from temp auth session)
+            is_expired = False
+            if not session_file_path:
+                is_expired = await self._is_session_expired(phone_number, db)
+            
             if is_expired:
                 logger.info(f"[GET_OR_CREATE_CLIENT] Session expired for {phone_number}, logging out")
                 try:
