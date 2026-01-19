@@ -285,8 +285,14 @@ class TelegramService:
                     logger.warning(f"[GET_OR_CREATE_CLIENT] Failed to reconnect existing client: {e}, creating new one")
 
             # Create new client
-            logger.debug(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number}")
-            client = await self.create_client(api_id, api_hash, phone_number=phone_number)
+            # Create new client
+            logger.debug(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number} with session: {session_name}")
+            client = await self.create_client(
+                api_id, 
+                api_hash, 
+                phone_number=phone_number,
+                session_name=session_name
+            )
             await client.connect()
             logger.debug(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
 
@@ -301,7 +307,7 @@ class TelegramService:
         api_id: int,
         api_hash: str,
         db: AsyncSession
-    ) -> tuple[TelegramClient, str]:
+    ) -> tuple[str, str]:
         """
         Send verification code to phone number.
 
@@ -312,7 +318,7 @@ class TelegramService:
             db: Database session
 
         Returns:
-            Tuple of (client, phone_code_hash)
+            Tuple of (phone_code_hash, session_file_path)
 
         Raises:
             TelegramAPIError: If API credentials are invalid
@@ -334,12 +340,31 @@ class TelegramService:
                     logger.warning(f"Error disconnecting old client: {e}")
 
             # 2. Create client with file-based session directly
-            client = await self.create_client(
-                api_id,
-                api_hash,
-                phone_number=phone_number
-            )
-            await client.connect()
+            # Wrap initial connection in try/except to handle "database is locked" errors
+            import sqlite3
+            try:
+                client = await self.create_client(
+                    api_id,
+                    api_hash,
+                    phone_number=phone_number
+                )
+                await client.connect()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e):
+                    logger.warning(f"Default session file locked (sqlite3), using unique session name. Error: {e}")
+                    # Use unique session name if default is locked
+                    import time
+                    timestamp = int(time.time())
+                    unique_session_name = f"{self._get_session_name(phone_number, api_id, api_hash)}_{timestamp}"
+                    
+                    client = await self.create_client(
+                        api_id,
+                        api_hash,
+                        session_name=unique_session_name
+                    )
+                    await client.connect()
+                else:
+                    raise
 
             # 3. Check if already authorized
             if await client.is_user_authorized():
@@ -379,9 +404,17 @@ class TelegramService:
             # Send verification code
             result = await client.send_code_request(phone_number)
             phone_code_hash = result.phone_code_hash
+            
+            # Capture session filename before disconnecting
+            session_filename = client.session.filename
+            
+            # Disconnect client to prevent file locks
+            if client.is_connected():
+                await client.disconnect()
+                logger.info(f"Disconnected client after sending code to {phone_number}")
 
             logger.info(f"Verification code sent to {phone_number}")
-            return client, phone_code_hash
+            return phone_code_hash, session_filename
 
         except PhoneNumberInvalidError as e:
             logger.error(f"Invalid phone number: {phone_number}")

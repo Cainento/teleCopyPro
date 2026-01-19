@@ -119,12 +119,12 @@ async def send_code(
             await session_service.remove_temp_session(phone_number, db)
 
         # Send verification code
-        client, phone_code_hash = await telegram_service.send_verification_code(
+        phone_code_hash, session_filename = await telegram_service.send_verification_code(
             phone_number, api_id, api_hash, db
         )
 
         # Get actual session file path (might be unique if default was locked)
-        session_file_path = f"{client.session.filename}.session"
+        session_file_path = f"{session_filename}.session"
 
         # Create temporary session in database (stores phone_code_hash for later use)
         await session_service.create_temp_session(
