@@ -1,6 +1,7 @@
 """Copy service for handling message copying operations."""
 
 import asyncio
+import random
 import uuid
 from datetime import datetime
 from typing import Callable, Optional
@@ -14,6 +15,8 @@ from app.database.repositories.session_repository import SessionRepository
 from app.database.repositories.user_repository import UserRepository
 from app.models.copy_job import CopyJob as PydanticCopyJob, CopyJobStatus
 from app.services.telegram_service import TelegramService
+from telethon.errors import FloodWaitError
+from telethon.tl.types import MessageService
 
 logger = get_logger(__name__)
 
@@ -49,7 +52,8 @@ class CopyService:
             created_at=db_job.created_at,
             started_at=db_job.started_at,
             completed_at=db_job.completed_at,
-            error_message=db_job.error_message
+            error_message=db_job.error_message,
+            status_message=db_job.status_message
         )
 
     async def _get_entity_with_retry(self, client, entity_id):
@@ -96,6 +100,53 @@ class CopyService:
                 # If all else fails, raise a helpful error
                 logger.error(f"Could not resolve entity {entity_id}")
                 raise CopyServiceError(f"Não foi possível encontrar o canal/grupo {entity_id}. Verifique se:\n1. Você é membro do canal/grupo\n2. O ID está correto\n3. Se for público, tente usar o @username")
+
+    async def _copy_message_with_retry(
+        self,
+        client,
+        target_entity,
+        message,
+        db_job=None
+    ) -> bool:
+        """
+        Copy a single message with retry logic for FloodWaitError.
+        
+        Returns:
+            bool: True if successful, False if failed
+        """
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                await client.send_message(target_entity, message)
+                
+                # Clear status message if it was set (e.g. after a wait)
+                if db_job and db_job.status_message:
+                     await self.job_repo.update_status(db_job, db_job.status, status_message="")
+                     await self.db.commit()
+                
+                return True
+                
+            except FloodWaitError as e:
+                wait_time = e.seconds
+                logger.warning(f"FloodWaitError: Waiting {wait_time} seconds before retrying...")
+                
+                if db_job:
+                    msg = f"Aguardando {wait_time}s (Limitação do Telegram)..."
+                    await self.job_repo.update_status(db_job, db_job.status, status_message=msg)
+                    await self.db.commit()
+                
+                await asyncio.sleep(wait_time + 1)
+                # Don't increment retry count for FloodWait, we must wait it out
+                continue
+                
+            except Exception as e:
+                retry_count += 1
+                logger.warning(f"Error copying message {message.id} (attempt {retry_count}/{max_retries}): {e}")
+                await asyncio.sleep(1 * retry_count)
+        
+        return False
 
     async def create_historical_job(
         self,
@@ -230,6 +281,9 @@ class CopyService:
             if not await client.is_user_authorized():
                 raise SessionError("Session não autorizada. Por favor, refaça o login.")
 
+            # Disable Telethon's auto-sleep so our code handles FloodWait and updates the UI
+            client.flood_sleep_threshold = 0
+
             # Update job status to running
             db_job = await self.job_repo.update_status(db_job, "running")
             await self.db.commit()
@@ -273,7 +327,7 @@ class CopyService:
             # Copy messages
             count = 0
             failed = 0
-            total_messages = 0
+            total_messages = None  # We don't count upfront to avoid blocking on large channels
 
             # If resuming, initialize counters from DB
             if job_id and db_job:
@@ -281,17 +335,10 @@ class CopyService:
                 failed = db_job.failed_messages
                 logger.info(f"Resuming job {job_id} from offset: {count + failed} (copied: {count}, failed: {failed})")
 
-            # Count total messages first (optional, for progress)
-            try:
-                # Note: Counting doesn't support offset efficiently, so we just add our current offset to what we find remaining?
-                # Or re-count all? Re-counting all is safer for total_messages accuracy.
-                async for _ in client.iter_messages(source_entity, reverse=True):
-                    total_messages += 1
-            except Exception:
-                pass  # If counting fails, we'll still copy
-            
             # Calculate offset for resume
             offset_count = count + failed
+            
+            logger.info(f"Starting message copy from {source_channel} to {target_channel}")
 
             # Copy messages
             skipped_count = 0
@@ -301,10 +348,20 @@ class CopyService:
                     skipped_count += 1
                     continue
 
+                # Skip Service Messages (e.g. pinned message, user joined, etc.)
+                if isinstance(message, MessageService):
+                    logger.debug(f"Skipping service message {message.id}")
+                    continue
+
                 try:
                     if copy_media or not message.media:
-                        await client.send_message(target_entity, message)
-                        count += 1
+                        success = await self._copy_message_with_retry(client, target_entity, message, db_job)
+                        
+                        if success:
+                            count += 1
+                        else:
+                            failed += 1
+                            logger.warning(f"Failed to copy message {message.id} after retries")
 
                         # Update progress every 10 messages
                         if count % 10 == 0:
@@ -320,10 +377,10 @@ class CopyService:
                             await self.job_repo.update_progress(db_job, count, total_messages, failed)
                             await self.db.commit()
 
-                        if progress_callback and total_messages > 0:
+                        if progress_callback and total_messages and total_messages > 0:
                             progress_callback(count, total_messages)
 
-                    await asyncio.sleep(0.1)  # Rate limiting
+                    await asyncio.sleep(random.uniform(1.1, 1.5))  # Rate limiting with jitter (~1.3s avg)
 
                 except Exception as e:
                     failed += 1
@@ -479,6 +536,10 @@ class CopyService:
                 # Create a new database session for this handler
                 async with AsyncSessionLocal() as handler_db:
                     try:
+                        # Skip Service Messages
+                        if isinstance(event.message, MessageService):
+                            return
+
                         if copy_media or not event.message.media:
                             # Update database (use fresh query to avoid stale data)
                             handler_repo = JobRepository(handler_db)
@@ -491,15 +552,56 @@ class CopyService:
                             logger.debug(f"[Handler {job_id}] Current DB status: {fresh_job.status}")
 
                             if fresh_job.status == "running":
-                                await client.send_message(target_entity, event.message)
-                                await handler_repo.update_progress(
-                                    fresh_job,
-                                    fresh_job.copied_messages + 1,
-                                    None,
-                                    fresh_job.failed_messages
-                                )
-                                await handler_db.commit()
-                                logger.info(f"[Handler {job_id}] Forwarded message {event.message.id}")
+                                # Handle Real-time FloodWait
+                                try:
+                                    await client.send_message(target_entity, event.message)
+                                    
+                                    # Clear status message if successful
+                                    if fresh_job.status_message:
+                                         await handler_repo.update_status(fresh_job, fresh_job.status, status_message="")
+                                
+                                    await handler_repo.update_progress(
+                                        fresh_job,
+                                        fresh_job.copied_messages + 1,
+                                        None,
+                                        fresh_job.failed_messages
+                                    )
+                                    await handler_db.commit()
+                                    logger.info(f"[Handler {job_id}] Forwarded message {event.message.id}")
+                                    
+                                except FloodWaitError as e:
+                                    wait_time = e.seconds
+                                    logger.warning(f"[Handler {job_id}] FloodWait: {wait_time}s")
+                                    
+                                    msg = f"Aguardando {wait_time}s (Limitação do Telegram)..."
+                                    await handler_repo.update_status(fresh_job, fresh_job.status, status_message=msg)
+                                    await handler_db.commit()
+                                    
+                                    await asyncio.sleep(wait_time + 1)
+                                    
+                                    # Retry once
+                                    try:
+                                        await client.send_message(target_entity, event.message)
+                                        # Clear status
+                                        await handler_repo.update_status(fresh_job, fresh_job.status, status_message="")
+                                        await handler_repo.update_progress(
+                                            fresh_job,
+                                            fresh_job.copied_messages + 1,
+                                            None,
+                                            fresh_job.failed_messages
+                                        )
+                                        await handler_db.commit()
+                                    except Exception as retry_e:
+                                        logger.error(f"[Handler {job_id}] Failed retry: {retry_e}")
+                                        # Count as failure
+                                        await handler_repo.update_progress(
+                                            fresh_job,
+                                            fresh_job.copied_messages,
+                                            None,
+                                            fresh_job.failed_messages + 1
+                                        )
+                                        await handler_db.commit()
+
                             elif fresh_job.status in ["stopped", "failed", "paused"]:
                                  # Job is in a terminal state or paused, remove handler to stop processing
                                  logger.warning(f"[Handler {job_id}] Job is {fresh_job.status}, removing handler and stopping processing.")

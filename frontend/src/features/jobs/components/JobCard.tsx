@@ -236,6 +236,16 @@ export const JobCard = memo(function JobCard({
           </div>
         </div>
 
+        {/* Status Message (e.g. Wait Time) */}
+        {job.status_message && (
+          <div className="mt-4 p-3 bg-orange-500/5 border border-orange-500/20 rounded-xl text-xs text-orange-600 flex items-start gap-2">
+            <Clock className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold">Status:</span> {job.status_message}
+            </div>
+          </div>
+        )}
+
         {/* Error Message */}
         {job.status === 'failed' && job.error_message && (
           <div className="mt-4 p-3 bg-destructive/5 border border-destructive/20 rounded-xl text-xs text-destructive flex items-start gap-2">

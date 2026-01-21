@@ -178,6 +178,17 @@ export function JobDetails({
             </div>
           </div>
 
+          {/* Status Message (e.g. Wait Time) */}
+          {job.status_message && (
+            <div className="mt-4 p-4 bg-orange-500/5 border border-orange-500/20 rounded-xl flex items-start gap-3">
+              <Clock className="h-5 w-5 text-orange-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold text-orange-600">Status:</span>
+                <span className="text-orange-600 ml-2">{job.status_message}</span>
+              </div>
+            </div>
+          )}
+
           {job.status === 'failed' && job.error_message && (
             <div className="mt-4 p-4 bg-destructive/5 border border-destructive/20 rounded-xl flex items-start gap-3">
               <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />

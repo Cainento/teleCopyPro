@@ -117,20 +117,38 @@ class JobRepository:
         job: CopyJob,
         status: str,
         error_message: Optional[str] = None,
+        status_message: Optional[str] = None,
     ) -> CopyJob:
         """Update job status."""
         job.status = status
+        
+        # Update status message if provided, or clear if None (optional behavior choice, here we update if provided)
+        # Actually, let's allow clearing it if passed explicitly as None?
+        # For simplicity: if status_message is passed, update it.
+        # But default is None. We might want to clear it when status changes to running?
+        # Let's just update if argument is passed (we need to change signature default logic if we want to differentiate "no change" vs "clear")
+        # To avoid complexity: We will set it to whatever is passed. If we want to keep it, caller must pass it or we need different logic.
+        # Better logic: Always update status_message if it's in the args.
+        if status_message is not None:
+             job.status_message = status_message
+        elif status == "running" and job.status == "paused":
+             # Optional: clear status message on resume?
+             pass
 
         if status == "running" and job.started_at is None:
             job.started_at = datetime.utcnow()
         elif status == "completed":
             job.completed_at = datetime.utcnow()
             job.progress_percentage = 100.0
+            job.status_message = None # Clear status message on completion
         elif status == "stopped":
             job.stopped_at = datetime.utcnow()
+            job.status_message = None # Clear status message on stop
         elif status == "failed":
             job.completed_at = datetime.utcnow()
             job.error_message = error_message
+            # Keep status message if it explains failure? Or clear?
+            # job.status_message = None
 
         await self.db.flush()
         await self.db.refresh(job)

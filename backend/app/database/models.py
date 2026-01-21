@@ -93,6 +93,7 @@ class CopyJob(Base):
 
     # Error tracking
     error_message = Column(Text, nullable=True)
+    status_message = Column(Text, nullable=True)
 
     # Timestamps (using Python datetime.now for database compatibility)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

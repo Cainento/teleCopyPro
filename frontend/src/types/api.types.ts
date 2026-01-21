@@ -20,6 +20,7 @@ export interface CopyJob {
   messages_copied: number;
   messages_failed: number;
   error_message?: string | null;
+  status_message?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
   created_at: string;

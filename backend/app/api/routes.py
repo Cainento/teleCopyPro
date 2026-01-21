@@ -573,6 +573,7 @@ async def list_jobs(
                         "completed_at": format_timestamp(job.completed_at),
                         "created_at": format_timestamp(job.created_at),
                         "error_message": job.error_message,
+                        "status_message": job.status_message,
                     }
                     for job in jobs
                 ]
@@ -634,6 +635,7 @@ async def get_job_status(
                 "completed_at": format_timestamp(job.completed_at),
                 "created_at": format_timestamp(job.created_at),
                 "error_message": job.error_message,
+                "status_message": job.status_message,
             },
             status_code=200
         )

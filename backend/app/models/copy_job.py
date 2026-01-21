@@ -42,6 +42,7 @@ class CopyJob(CopyJobBase):
     messages_copied: int = Field(default=0, ge=0, description="Number of messages copied")
     messages_failed: int = Field(default=0, ge=0, description="Number of messages that failed to copy")
     error_message: Optional[str] = Field(None, description="Error message if job failed")
+    status_message: Optional[str] = Field(None, description="Current status message (e.g. wait time)")
     started_at: Optional[datetime] = Field(None, description="Job start time")
     completed_at: Optional[datetime] = Field(None, description="Job completion time")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Job creation date")
