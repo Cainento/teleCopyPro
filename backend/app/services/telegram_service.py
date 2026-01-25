@@ -330,6 +330,7 @@ class TelegramService:
             session_name = self._get_session_name(phone_number, api_id, api_hash)
             
             # 1. First, ensure any existing active client for this session is disconnected
+            # We do this to ensure we don't have a conflict in memory
             if session_name in self._active_clients:
                 logger.info(f"Discarding existing active client for {phone_number} to avoid locks")
                 old_client = self._active_clients.pop(session_name)
@@ -339,67 +340,66 @@ class TelegramService:
                 except Exception as e:
                     logger.warning(f"Error disconnecting old client: {e}")
 
-            # 2. Create client with file-based session directly
-            # Wrap initial connection in try/except to handle "database is locked" errors
+            # 2. Check if the default session file exists and is authorized/locked
+            # We strictly want to avoid reusing the old session file for a NEW login attempt
+            # to prevent "attempt to write a readonly database" or "locked" errors.
+            # So, we will optimisticly try to create a client.
+            
             import sqlite3
+            import time
+            
+            use_unique_session = False
+            
+            # Create a temporary client just to check the state or start fresh
             try:
+                # Try to connect with standard name first
                 client = await self.create_client(
                     api_id,
                     api_hash,
                     phone_number=phone_number
                 )
                 await client.connect()
+                
+                # Check if authorized. If authorized, it means there is an old session lingering.
+                # In previous versions, we auto-logged out. NOW, we will just ignore it and use a new session.
+                if await client.is_user_authorized():
+                    logger.info(f"User {phone_number} already authorized in existing session - Creating NEW session for re-authentication")
+                    use_unique_session = True
+                    await client.disconnect()
+                    
             except sqlite3.OperationalError as e:
-                if "database is locked" in str(e):
-                    logger.warning(f"Default session file locked (sqlite3), using unique session name. Error: {e}")
-                    # Use unique session name if default is locked
-                    import time
-                    timestamp = int(time.time())
-                    unique_session_name = f"{self._get_session_name(phone_number, api_id, api_hash)}_{timestamp}"
-                    
-                    client = await self.create_client(
+                # If locked or readonly, definitely use a new session
+                logger.warning(f"Session file locked/error (sqlite3): {e} - Will use unique session")
+                use_unique_session = True
+            except Exception as e:
+                logger.warning(f"Error checking existing session: {e} - Will use unique session")
+                use_unique_session = True
+
+            # 3. Create the actual client for sending the code
+            if use_unique_session:
+                timestamp = int(time.time())
+                unique_session_name = f"{self._get_session_name(phone_number, api_id, api_hash)}_{timestamp}"
+                logger.info(f"Using unique session name for new login: {unique_session_name}")
+                
+                client = await self.create_client(
+                    api_id,
+                    api_hash,
+                    session_name=unique_session_name
+                )
+                await client.connect()
+            else:
+                # If we didn't flag for unique session, means we connected successfully above and not authorized?
+                # Actually, if we are here, we might need to reconnect if we disconnected above.
+                # Simpler: just ensure we have a connected client.
+                # If 'client' variable exists from block above and is connected, use it? 
+                # Better to be safe: create client again if needed.
+                if 'client' not in locals() or not client.is_connected():
+                     client = await self.create_client(
                         api_id,
                         api_hash,
-                        session_name=unique_session_name
+                        phone_number=phone_number
                     )
-                    await client.connect()
-                else:
-                    raise
-
-            # 3. Check if already authorized
-            if await client.is_user_authorized():
-                logger.info(f"User {phone_number} already authorized - auto-logout to allow re-authentication")
-                # Auto-logout
-                try:
-                    if client.is_connected():
-                        await client.disconnect()
-                    
-                    file_deleted = await self.logout(phone_number, db, api_id, api_hash)
-                    logger.info(f"Auto-logout result for {phone_number}: file_deleted={file_deleted}")
-
-                    server_session_name = None
-                    if not file_deleted:
-                        # File locked, use unique session name
-                        import time
-                        timestamp = int(time.time())
-                        server_session_name = f"{self._get_session_name(phone_number, api_id, api_hash)}_{timestamp}"
-                        logger.warning(f"Session file locked, using unique session name: {server_session_name}")
-
-                    # Recreate client for fresh authentication
-                    client = await self.create_client(
-                        api_id,
-                        api_hash,
-                        phone_number=phone_number,
-                        session_name=server_session_name
-                    )
-                    await client.connect()
-                except Exception as logout_error:
-                    logger.error(f"Error during auto-logout for {phone_number}: {logout_error}", exc_info=True)
-                    # Use specific error message if it's a SessionError
-                    msg = str(logout_error)
-                    if "WinError 32" in msg:
-                         msg = "O arquivo de sessão está bloqueado por outro processo. Tente novamente em alguns segundos."
-                    raise TelegramAPIError(f"Erro ao reiniciar sessão: {msg}")
+                     await client.connect()
 
             # Send verification code
             result = await client.send_code_request(phone_number)
@@ -749,8 +749,6 @@ class TelegramService:
                             retry_delay *= 2  # Exponential backoff
                         else:
                             logger.error(f"Failed to delete session file after {max_retries} attempts: {session_path}")
-                            # Don't raise here, just log error, as we might still want to proceed
-                            # removing from DB
                     except Exception as e:
                         logger.warning(f"Error deleting session file: {e}")
                         file_deleted = False
@@ -759,6 +757,12 @@ class TelegramService:
                 logger.warning(f"Session file not found: {session_path}")
                 file_deleted = True
 
+            if not file_deleted:
+                # If file deletion fails, we log a warning but PROCEED to delete from DB.
+                # This ensures the user is logged out of the app.
+                # The locked file will be ignored by future logins (handled by unique session logic).
+                logger.warning(f"Session file locked for {phone_number}, proceeding with DB deletion anyway.")
+                
             # Deactivate session in database
             session_repo = self._get_session_repo(db)
             try:
@@ -777,8 +781,10 @@ class TelegramService:
             logger.info(f"Logout successful for {phone_number}")
             return file_deleted
 
+        except SessionError:
+            raise
         except Exception as e:
-            logger.error(f"Error during auto-logout for {phone_number}: {e}", exc_info=True)
+            logger.error(f"Error during logout for {phone_number}: {e}", exc_info=True)
             raise SessionError(f"Erro ao fazer logout: {str(e)}")
 
     async def cleanup(self) -> None:
