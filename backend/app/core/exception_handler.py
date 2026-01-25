@@ -7,7 +7,11 @@ from telethon.errors import (
     FloodWaitError,
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
+    FloodWaitError,
+    phone_code_invalid_error,
+    PhoneNumberInvalidError,
     SessionPasswordNeededError,
+    AuthKeyUnregisteredError,
 )
 
 from app.core.exceptions import (
@@ -95,6 +99,10 @@ def map_telethon_error(exc: Exception) -> TeleCopyException:
         return AuthenticationError(
             "Senha de verificação em duas etapas necessária.",
             details={"requires_2fa": True}
+        )
+    elif isinstance(exc, AuthKeyUnregisteredError):
+        return SessionError(
+            "Sessão expirada ou revogada via dispositivo. Por favor, faça login novamente."
         )
     else:
         return TelegramAPIError(f"Erro na API do Telegram: {str(exc)}")

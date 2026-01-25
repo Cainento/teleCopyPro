@@ -15,7 +15,7 @@ from app.database.repositories.session_repository import SessionRepository
 from app.database.repositories.user_repository import UserRepository
 from app.models.copy_job import CopyJob as PydanticCopyJob, CopyJobStatus
 from app.services.telegram_service import TelegramService
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, AuthKeyUnregisteredError
 from telethon.tl.types import MessageService
 
 logger = get_logger(__name__)
@@ -399,6 +399,13 @@ class CopyService:
                 f"Copy job {job_id} finished ({db_job.status}): {count} messages copied, {failed} failed"
             )
 
+        except AuthKeyUnregisteredError:
+            logger.error(f"Session revoked during copy job {job_id}")
+            await self.job_repo.update_status(db_job, "failed", error_message="Sessão revogada. Faça login novamente.")
+            await self.db.commit()
+            await self._telegram_service.handle_session_revoked(phone_number)
+            raise SessionError("Sessão revogada/expirada. Faça login novamente.")
+
         except Exception as e:
             await self.job_repo.update_status(db_job, "failed", error_message=str(e))
             await self.db.commit()
@@ -645,6 +652,12 @@ class CopyService:
             db_job = await self.job_repo.update_status(db_job, "running")
 
             logger.info(f"Real-time copy job {job_id} started: {source_channel} -> {target_channel}")
+
+        except AuthKeyUnregisteredError:
+            logger.error(f"Session revoked during real-time setup for {job_id}")
+            await self.job_repo.update_status(db_job, "failed", error_message="Sessão revogada. Faça login novamente.")
+            await self._telegram_service.handle_session_revoked(phone_number)
+            raise SessionError("Sessão revogada/expirada. Faça login novamente.")
 
         except Exception as e:
             await self.job_repo.update_status(db_job, "failed", error_message=str(e))

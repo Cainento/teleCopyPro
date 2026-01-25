@@ -56,6 +56,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error starting plan expiry scheduler: {e}", exc_info=True)
 
+    # Start Telegram session monitor (checks for revoked sessions)
+    try:
+        from app.api.dependencies import get_telegram_service
+        telegram_service = get_telegram_service()
+        # We need to start this on a background task
+        asyncio.create_task(telegram_service.start_session_monitor(interval_seconds=60))
+    except Exception as e:
+        logger.error(f"Error starting session monitor: {e}", exc_info=True)
+
     # Resume active real-time jobs
     try:
         logger.info("Starting job resume process...")
@@ -143,12 +152,14 @@ from telethon.errors import (
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
     SessionPasswordNeededError,
+    AuthKeyUnregisteredError,
 )
 app.add_exception_handler(PhoneNumberInvalidError, telethon_exception_handler)
 app.add_exception_handler(ApiIdInvalidError, telethon_exception_handler)
 app.add_exception_handler(FloodWaitError, telethon_exception_handler)
 app.add_exception_handler(PhoneCodeInvalidError, telethon_exception_handler)
 app.add_exception_handler(SessionPasswordNeededError, telethon_exception_handler)
+app.add_exception_handler(AuthKeyUnregisteredError, telethon_exception_handler)
 
 # Include API routes
 app.include_router(router)
