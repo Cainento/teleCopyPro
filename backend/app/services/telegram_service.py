@@ -175,7 +175,7 @@ class TelegramService:
         api_hash: str,
         phone_number: Optional[str] = None,
         session_name: Optional[str] = None,
-        use_string_session: bool = False
+        session_string: Optional[str] = None
     ) -> TelegramClient:
         """
         Create a Telegram client instance.
@@ -184,28 +184,30 @@ class TelegramService:
             api_id: Telegram API ID
             api_hash: Telegram API Hash
             phone_number: Phone number (for session naming)
-            session_name: Custom session name
-            use_string_session: Whether to use StringSession (for temporary auth)
+            session_name: Custom session name (for file-based sessions)
+            session_string: StringSession data to load from DB
 
         Returns:
             TelegramClient instance
         """
-        if use_string_session:
-            session = StringSession()
-            logger.info(f"[CREATE_CLIENT] Using StringSession")
-        else:
-            if not session_name and phone_number:
-                session_name = self._get_session_name(phone_number, api_id, api_hash)
-            elif not session_name:
-                raise ValueError("Either phone_number or session_name must be provided")
-
+        if session_string:
+            # Load existing session from database string
+            session = StringSession(session_string)
+            logger.info(f"[CREATE_CLIENT] Using StringSession from DB (len={len(session_string)})")
+        elif session_name:
+            # File-based session (legacy)
             session_path = self._get_session_path(session_name)
-            # TelegramClient adds .session extension automatically, so remove it
-            session = str(session_path).replace('.session', '')
-            logger.debug(f"[CREATE_CLIENT] Session path: {session_path}, Cleaned session: {session}")
+            session = str(session_path.with_suffix(''))
+            logger.info(f"[CREATE_CLIENT] Session input: {session}, Final Path: {session_path}")
+        elif phone_number:
+            # Create a new empty StringSession for new auth flow
+            session = StringSession()
+            logger.info(f"[CREATE_CLIENT] Using NEW empty StringSession for {phone_number}")
+        else:
+            raise ValueError("Either phone_number, session_name, or session_string must be provided")
 
         client = TelegramClient(session, api_id, api_hash)
-        logger.debug(f"[CREATE_CLIENT] Created client with session: {session}")
+        logger.debug(f"[CREATE_CLIENT] Created client")
         return client
 
     async def get_or_create_client(
@@ -214,7 +216,7 @@ class TelegramService:
         api_id: int,
         api_hash: str,
         db: AsyncSession,
-        session_file_path: Optional[str] = None
+        session_string: Optional[str] = None
     ) -> TelegramClient:
         """
         Get existing client or create a new one.
@@ -224,83 +226,77 @@ class TelegramService:
             api_id: Telegram API ID
             api_hash: Telegram API Hash
             db: Database session
-            session_file_path: Optional specific session file path to use
+            session_string: Optional session string to use directly
 
         Returns:
             TelegramClient instance
         """
-        if session_file_path:
-            # Extract session name from path (filename without extension)
-            path_obj = Path(session_file_path)
-            session_name = path_obj.stem
-        else:
-            # Try to look up unique session path from database first
+        # Use phone number as key for active clients (unique per user)
+        session_key = self._get_session_name(phone_number, api_id, api_hash)
+        db_session_string = None
+        
+        if not session_string:
+            # Try to look up session_string from database first
             session_repo = self._get_session_repo(db)
             try:
                 db_session = await session_repo.get_by_phone(phone_number)
-                if db_session and db_session.session_file_path:
-                    # Use the stored session path (which might be a unique timestamped one)
-                    path_obj = Path(db_session.session_file_path)
-                    session_name = path_obj.stem
-                    logger.debug(f"[GET_OR_CREATE_CLIENT] Found stored session path for {phone_number}: {session_name}")
-                else:
-                    session_name = self._get_session_name(phone_number, api_id, api_hash)
+                if db_session and db_session.session_string:
+                    db_session_string = db_session.session_string
+                    logger.info(f"[GET_OR_CREATE_CLIENT] Found session_string in DB for {phone_number} (len={len(db_session_string)})")
+                elif db_session:
+                    logger.info(f"[GET_OR_CREATE_CLIENT] DB session found for {phone_number} but no session_string (legacy file-based)")
             except Exception as e:
                 logger.warning(f"[GET_OR_CREATE_CLIENT] Error looking up session in DB: {e}")
-                session_name = self._get_session_name(phone_number, api_id, api_hash)
+        else:
+            db_session_string = session_string
+            logger.info(f"[GET_OR_CREATE_CLIENT] Using provided session_string for {phone_number}")
         
-        async with self._get_lock(session_name):
-            logger.debug(f"[GET_OR_CREATE_CLIENT] Session name: {session_name} (Lock acquired)")
+        async with self._get_lock(session_key):
+            logger.debug(f"[GET_OR_CREATE_CLIENT] Session key: {session_key} (Lock acquired)")
 
             # Check if session is expired (>7 days)
-            # Skip check if we are loading a specific session file (e.g. from temp auth session)
-            is_expired = False
-            if not session_file_path:
-                is_expired = await self._is_session_expired(phone_number, db)
+            is_expired = await self._is_session_expired(phone_number, db)
             
             if is_expired:
-                logger.info(f"[GET_OR_CREATE_CLIENT] Session expired for {phone_number}, logging out")
-                try:
-                    if session_name in self._active_clients:
-                        client = self._active_clients.pop(session_name)
+                logger.info(f"[GET_OR_CREATE_CLIENT] Session expired for {phone_number}, clearing cached client")
+                if session_key in self._active_clients:
+                    client = self._active_clients.pop(session_key)
+                    try:
                         if client.is_connected():
                             await client.disconnect()
-                    
-                    session_path = self._get_session_path(session_name)
-                    if session_path.exists():
-                        session_path.unlink()
-                except Exception as e:
-                    logger.error(f"Error during auto-logout of expired session: {e}", exc_info=True)
+                    except Exception as e:
+                        logger.warning(f"Error disconnecting expired client: {e}")
 
             # Check if client is already active
-            if session_name in self._active_clients and not is_expired:
-                client = self._active_clients[session_name]
+            if session_key in self._active_clients and not is_expired:
+                client = self._active_clients[session_key]
                 logger.debug(f"[GET_OR_CREATE_CLIENT] Found active client object, connected: {client.is_connected()}")
                 if client.is_connected():
                     return client
                 
-                # If disconnected, try to reconnect the existing client object instead of creating a new one
+                # If disconnected, try to reconnect the existing client object
                 try:
                     logger.info(f"[GET_OR_CREATE_CLIENT] Reconnecting existing client for {phone_number}")
                     await client.connect()
                     return client
                 except Exception as e:
-                    logger.warning(f"[GET_OR_CREATE_CLIENT] Failed to reconnect existing client: {e}, creating new one")
+                    logger.warning(f"[GET_OR_CREATE_CLIENT] Failed to reconnect: {e}, creating new one")
 
-            # Create new client
-            # Create new client
-            logger.debug(f"[GET_OR_CREATE_CLIENT] Creating new client for {phone_number} with session: {session_name}")
-            client = await self.create_client(
-                api_id, 
-                api_hash, 
-                phone_number=phone_number,
-                session_name=session_name
-            )
+            logger.info(f"[GET_OR_CREATE_CLIENT] Session {session_key} NOT found in active_clients. Available: {list(self._active_clients.keys())}")
+
+            # Create new client - prefer session_string first
+            if db_session_string:
+                logger.info(f"[GET_OR_CREATE_CLIENT] Creating client from session_string for {phone_number}")
+                client = await self.create_client(api_id, api_hash, session_string=db_session_string)
+            else:
+                logger.info(f"[GET_OR_CREATE_CLIENT] Creating client with new StringSession for {phone_number}")
+                client = await self.create_client(api_id, api_hash, phone_number=phone_number)
+            
             await client.connect()
             logger.debug(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
 
             # Store active client
-            self._active_clients[session_name] = client
+            self._active_clients[session_key] = client
 
             return client
 
@@ -321,7 +317,7 @@ class TelegramService:
             db: Database session
 
         Returns:
-            Tuple of (phone_code_hash, session_file_path)
+            Tuple of (phone_code_hash, session_string)
 
         Raises:
             TelegramAPIError: If API credentials are invalid
@@ -329,95 +325,38 @@ class TelegramService:
             ValidationError: If phone number is invalid
         """
         try:
-            # Generate session name to check for existing active clients
-            session_name = self._get_session_name(phone_number, api_id, api_hash)
+            # Generate session key for caching
+            session_key = self._get_session_name(phone_number, api_id, api_hash)
             
-            # 1. First, ensure any existing active client for this session is disconnected
-            # We do this to ensure we don't have a conflict in memory
-            if session_name in self._active_clients:
-                logger.info(f"Discarding existing active client for {phone_number} to avoid locks")
-                old_client = self._active_clients.pop(session_name)
+            # Disconnect any existing active clients for this phone
+            if session_key in self._active_clients:
+                logger.info(f"Discarding existing active client for {phone_number}")
+                old_client = self._active_clients.pop(session_key)
                 try:
                     if old_client.is_connected():
                         await old_client.disconnect()
                 except Exception as e:
                     logger.warning(f"Error disconnecting old client: {e}")
 
-            # 2. Check if the default session file exists and is authorized/locked
-            # We strictly want to avoid reusing the old session file for a NEW login attempt
-            # to prevent "attempt to write a readonly database" or "locked" errors.
-            # So, we will optimisticly try to create a client.
-            
-            import sqlite3
-            import time
-            
-            use_unique_session = False
-            
-            # Create a temporary client just to check the state or start fresh
-            try:
-                # Try to connect with standard name first
-                client = await self.create_client(
-                    api_id,
-                    api_hash,
-                    phone_number=phone_number
-                )
-                await client.connect()
-                
-                # Check if authorized. If authorized, it means there is an old session lingering.
-                # In previous versions, we auto-logged out. NOW, we will just ignore it and use a new session.
-                if await client.is_user_authorized():
-                    logger.info(f"User {phone_number} already authorized in existing session - Creating NEW session for re-authentication")
-                    use_unique_session = True
-                    await client.disconnect()
-                    
-            except sqlite3.OperationalError as e:
-                # If locked or readonly, definitely use a new session
-                logger.warning(f"Session file locked/error (sqlite3): {e} - Will use unique session")
-                use_unique_session = True
-            except Exception as e:
-                logger.warning(f"Error checking existing session: {e} - Will use unique session")
-                use_unique_session = True
-
-            # 3. Create the actual client for sending the code
-            if use_unique_session:
-                timestamp = int(time.time())
-                unique_session_name = f"{self._get_session_name(phone_number, api_id, api_hash)}_{timestamp}"
-                logger.info(f"Using unique session name for new login: {unique_session_name}")
-                
-                client = await self.create_client(
-                    api_id,
-                    api_hash,
-                    session_name=unique_session_name
-                )
-                await client.connect()
-            else:
-                # If we didn't flag for unique session, means we connected successfully above and not authorized?
-                # Actually, if we are here, we might need to reconnect if we disconnected above.
-                # Simpler: just ensure we have a connected client.
-                # If 'client' variable exists from block above and is connected, use it? 
-                # Better to be safe: create client again if needed.
-                if 'client' not in locals() or not client.is_connected():
-                     client = await self.create_client(
-                        api_id,
-                        api_hash,
-                        phone_number=phone_number
-                    )
-                     await client.connect()
+            # Create a NEW StringSession client for authentication
+            client = await self.create_client(api_id, api_hash, phone_number=phone_number)
+            await client.connect()
 
             # Send verification code
             result = await client.send_code_request(phone_number)
             phone_code_hash = result.phone_code_hash
             
-            # Capture session filename before disconnecting
-            session_filename = client.session.filename
-            
-            # Disconnect client to prevent file locks
-            if client.is_connected():
-                await client.disconnect()
-                logger.info(f"Disconnected client after sending code to {phone_number}")
+            # Extract session string for DB storage
+            session_string = client.session.save()
+            logger.info(f"[SEND_CODE] Session string extracted (len={len(session_string)})")
 
+            # Store client in active_clients for reuse in verify_code
+            self._active_clients[session_key] = client
+            logger.info(f"Registered client for {phone_number} in active_clients")
+
+            # Keep client connected for verify_code to reuse
             logger.info(f"Verification code sent to {phone_number}")
-            return phone_code_hash, session_filename
+            return phone_code_hash, session_string
 
         except PhoneNumberInvalidError as e:
             logger.error(f"Invalid phone number: {phone_number}")
@@ -461,11 +400,29 @@ class TelegramService:
             # Sign in with code
             user = await client.sign_in(phone_number, phone_code, phone_code_hash=phone_code_hash)
 
-            # Get session name and store active client
-            session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
+            # CORRECTLY determine session name from the active client's session file
+            # This ensures we use the unique name (e.g. phone_TIMESTAMP) instead of the base name
+            # preventing key mismatches in _active_clients
+            if hasattr(client.session, 'filename'):
+                 import pathlib
+                 session_name = pathlib.Path(client.session.filename).stem
+            else:
+                 # Fallback (e.g. MemorySession)
+                 session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
+            
+            logger.info(f"[VERIFY_CODE] Authenticated session: {session_name}")
 
-            # Store active client
+            # Store active client (update/ensure it's in the map under the correct key)
             self._active_clients[session_name] = client
+            
+            # Force save/flush of the session state
+            # Telethon SQLite session usually saves on changes, but we want to be sure
+            try:
+                if hasattr(client.session, 'save'):
+                    client.session.save()
+                    logger.info(f"[VERIFY_CODE] Forced session save for {session_name}")
+            except Exception as e:
+                logger.warning(f"Error saving session state: {e}")
 
             # Store API credentials for this session
             self._session_credentials[session_name] = {
@@ -520,10 +477,23 @@ class TelegramService:
 
             # Now the client is fully authenticated
             if phone_number:
-                session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
+                # CORRECTLY determine session name from the active client's session file
+                if hasattr(client.session, 'filename'):
+                     import pathlib
+                     session_name = pathlib.Path(client.session.filename).stem
+                else:
+                     session_name = self._get_session_name(phone_number, client.api_id, client.api_hash)
 
                 # Store active client
                 self._active_clients[session_name] = client
+                
+                # Force save/flush of the session state for 2FA as well
+                try:
+                    if hasattr(client.session, 'save'):
+                        client.session.save()
+                        logger.info(f"[VERIFY_2FA] Forced session save for {session_name}")
+                except Exception as e:
+                    logger.warning(f"Error saving session state after 2FA: {e}")
 
                 # Store API credentials for this session
                 self._session_credentials[session_name] = {
@@ -857,22 +827,47 @@ class TelegramService:
                 try:
                     is_auth = await client.is_user_authorized()
                     if not is_auth:
-                        logger.warning(f"Session {session_name} is no longer authorized. creating cleanup task.")
-                        # Parse phone number from session name (simplified)
-                        # We might need a reverse map or just store it better, but for now:
-                        # session_name starts with phone number digits.
-                        # Ideally we find the phone number from the client or our map.
+                        # Hybrid Approach: Only clean up if NO active jobs
+                        # This protects background jobs from false-negative authorization checks
+                        should_cleanup = True
                         
-                        # Find phone number from session_name
-                        phone_number = None
-                        # Try to match with session credentials cache
-                        for p_num, creds in self._session_credentials.items():
-                             # This logic is a bit weak if we don't have a direct map
-                             pass
-                        
-                        # Better approach: Iterate active clients map and disconnect
-                        # We will trigger handle_session_revoked
-                        pass 
+                        try:
+                            # Extract phone number from session name
+                            # Format: phone_hash or phone_hash_timestamp or phone
+                            # We assume the part before the first underscore is the phone number (with or without +)
+                            phone_part = session_name.split('_')[0]
+                            # Add + if missing (Telegram format)
+                            if not phone_part.startswith('+'):
+                                phone_part = f"+{phone_part}"
+                                
+                            from app.database.connection import AsyncSessionLocal
+                            from app.database.repositories.user_repository import UserRepository
+                            from app.database.repositories.job_repository import JobRepository
+                            
+                            async with AsyncSessionLocal() as db:
+                                user_repo = UserRepository(db)
+                                job_repo = JobRepository(db)
+                                
+                                user = await user_repo.get_by_phone(phone_part)
+                                if user:
+                                    active_jobs = await job_repo.get_active_jobs_by_user(user.id)
+                                    if active_jobs:
+                                        logger.warning(f"Session {session_name} reported unauthorized, but user has {len(active_jobs)} active jobs. SKIPPING cleanup to protect jobs.")
+                                        should_cleanup = False
+                                    else:
+                                        logger.info(f"Session {session_name} unauthorized and no active jobs found. Proceeding with cleanup.")
+                                else:
+                                    logger.warning(f"Could not find user for session {session_name} (phone: {phone_part}). Proceeding with cleanup.")
+                                    
+                        except Exception as e:
+                            logger.error(f"Error checking active jobs during session cleanup: {e}. Defaulting to NO cleanup for safety.")
+                            should_cleanup = False
+
+                        if should_cleanup:
+                            logger.warning(f"Session {session_name} is no longer authorized. creating cleanup task.")
+                            await self._handle_revoked_session_by_name(session_name)
+                        else:
+                            pass # Skip cleanup
 
                 except AuthKeyUnregisteredError:
                     logger.warning(f"Session {session_name} revoked (AuthKeyUnregisteredError). Cleaning up.")

@@ -120,7 +120,8 @@ class TelegramSession(Base):
 
     # Telegram credentials
     phone_number = Column(String(50), unique=True, nullable=False, index=True)
-    session_file_path = Column(String(500), nullable=False)  # Path to .session file
+    session_file_path = Column(String(500), nullable=True)  # Path to .session file (legacy/optional)
+    session_string = Column(Text, nullable=True)  # StringSession data
     api_id = Column(String(100), nullable=False)
     api_hash = Column(String(100), nullable=False)
 
@@ -237,6 +238,7 @@ class TempAuthSession(Base):
     # Auth flow state
     phone_code_hash = Column(String(255), nullable=False)  # Telegram's phone_code_hash for verification
     session_file_path = Column(String(500), nullable=True)  # Path to .session file if created
+    session_string = Column(Text, nullable=True)  # StringSession data
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

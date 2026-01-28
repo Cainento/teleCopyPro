@@ -47,10 +47,9 @@ class SessionService:
         user_id: int,
         phone_number: str,
         api_id: int,
-
         api_hash: str,
         db: AsyncSession,
-        session_file_path: Optional[str] = None
+        session_string: Optional[str] = None
     ) -> None:
         """
         Create or update a session record in the database to persist API credentials.
@@ -61,7 +60,7 @@ class SessionService:
             api_id: Telegram API ID
             api_hash: Telegram API Hash
             db: Database session
-            session_file_path: Optional specific session file path to use (if different from default)
+            session_string: StringSession data to store
         """
         session_repo = self._get_session_repo(db)
 
@@ -70,8 +69,7 @@ class SessionService:
             existing_session = await session_repo.get_by_phone(phone_number)
             
             if existing_session:
-                # Update existing session with new credentials if they changed
-                # Also update session_file_path if provided (e.g. for unique timestamped sessions)
+                # Update existing session
                 updated = False
                 
                 if existing_session.api_id != str(api_id) or existing_session.api_hash != api_hash:
@@ -79,33 +77,27 @@ class SessionService:
                     existing_session.api_hash = api_hash
                     updated = True
                 
-                if session_file_path and existing_session.session_file_path != session_file_path:
-                    existing_session.session_file_path = session_file_path
+                if session_string and existing_session.session_string != session_string:
+                    existing_session.session_string = session_string
                     updated = True
                 
                 if updated:
                     existing_session.is_active = True
                     await session_repo.update_last_used(existing_session)
-                    logger.info(f"Updated session credentials/path in database for {phone_number}")
+                    logger.info(f"Updated session in database for {phone_number}")
                 else:
-                    # Credentials haven't changed, but verify is_active
                     if not existing_session.is_active:
                          existing_session.is_active = True
                          await session_repo.update_last_used(existing_session)
                          logger.info(f"Reactivated existing session for {phone_number}")
                     else:
-                        logger.debug(f"Session credentials unchanged for {phone_number}")
+                        logger.debug(f"Session unchanged for {phone_number}")
             else:
                 # Create new session record
-                if not session_file_path:
-                    session_name = self._telegram_service._get_session_name(phone_number, api_id, api_hash)
-                    session_path = self._telegram_service._get_session_path(session_name)
-                    session_file_path = str(session_path)
-                
                 await session_repo.create(
                     user_id=user_id,
                     phone_number=phone_number,
-                    session_file_path=session_file_path,
+                    session_string=session_string,
                     api_id=str(api_id),
                     api_hash=api_hash
                 )
@@ -133,7 +125,7 @@ class SessionService:
         api_hash: str,
         phone_code_hash: str,
         db: AsyncSession,
-        session_file_path: str,
+        session_string: str,
         timeout: int = 300
     ) -> str:
         """
@@ -145,6 +137,7 @@ class SessionService:
             api_hash: Telegram API Hash
             phone_code_hash: Phone code hash from Telegram
             db: Database session
+            session_string: StringSession data
             timeout: Session timeout in seconds (default: 5 minutes)
 
         Returns:
@@ -163,7 +156,7 @@ class SessionService:
                 api_id=str(api_id),
                 api_hash=api_hash,
                 phone_code_hash=phone_code_hash,
-                session_file_path=session_file_path,
+                session_string=session_string,
                 expires_at=expires_at,
             )
             await db.commit()
@@ -216,7 +209,7 @@ class SessionService:
                 "api_id": int(session.api_id),
                 "api_hash": session.api_hash,
                 "phone_code_hash": session.phone_code_hash,
-                "session_file_path": session.session_file_path,
+                "session_string": session.session_string,
                 "created_at": session.created_at,
                 "expires_at": session.expires_at,
             }

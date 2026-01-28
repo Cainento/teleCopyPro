@@ -15,7 +15,12 @@ from app.database.repositories.session_repository import SessionRepository
 from app.database.repositories.user_repository import UserRepository
 from app.models.copy_job import CopyJob as PydanticCopyJob, CopyJobStatus
 from app.services.telegram_service import TelegramService
-from telethon.errors import FloodWaitError, AuthKeyUnregisteredError
+from telethon.errors import (
+    FloodWaitError, 
+    AuthKeyUnregisteredError, 
+    ChannelPrivateError,
+    ChatForwardsRestrictedError
+)
 from telethon.tl.types import MessageService
 
 logger = get_logger(__name__)
@@ -140,6 +145,11 @@ class CopyService:
                 await asyncio.sleep(wait_time + 1)
                 # Don't increment retry count for FloodWait, we must wait it out
                 continue
+
+            except (ChannelPrivateError, ChatForwardsRestrictedError) as e:
+                # Fatal errors - do not retry, stop the job
+                logger.error(f"Permission error: {e}")
+                raise CopyServiceError(f"Erro de permissão: O canal é privado ou possui restrição de encaminhamento (conteúdo protegido).") from e
                 
             except Exception as e:
                 retry_count += 1
@@ -382,6 +392,9 @@ class CopyService:
 
                     await asyncio.sleep(random.uniform(1.1, 1.5))  # Rate limiting with jitter (~1.3s avg)
 
+                except CopyServiceError:
+                    # Propagate fatal errors (like permissions) up to cancel the job
+                    raise
                 except Exception as e:
                     failed += 1
                     logger.warning(f"Failed to copy message {message.id}: {e}")

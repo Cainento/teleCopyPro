@@ -24,7 +24,7 @@ class TempAuthRepository:
         api_hash: str,
         phone_code_hash: str,
         expires_at: datetime,
-        session_file_path: Optional[str] = None,
+        session_string: Optional[str] = None,
     ) -> TempAuthSession:
         """Create a new temporary auth session."""
         session = TempAuthSession(
@@ -33,7 +33,7 @@ class TempAuthRepository:
             api_id=api_id,
             api_hash=api_hash,
             phone_code_hash=phone_code_hash,
-            session_file_path=session_file_path,
+            session_string=session_string,
             expires_at=expires_at,
         )
         self.db.add(session)
@@ -71,7 +71,7 @@ class TempAuthRepository:
         api_hash: str,
         phone_code_hash: str,
         expires_at: datetime,
-        session_file_path: Optional[str] = None,
+        session_string: Optional[str] = None,
     ) -> TempAuthSession:
         """Create or update a temp auth session."""
         existing = await self.get_by_key(session_key)
@@ -81,7 +81,7 @@ class TempAuthRepository:
             existing.api_id = api_id
             existing.api_hash = api_hash
             existing.phone_code_hash = phone_code_hash
-            existing.session_file_path = session_file_path
+            existing.session_string = session_string
             existing.expires_at = expires_at
             existing.created_at = datetime.utcnow()
             await self.db.flush()
@@ -95,6 +95,6 @@ class TempAuthRepository:
                 api_id=api_id,
                 api_hash=api_hash,
                 phone_code_hash=phone_code_hash,
-                session_file_path=session_file_path,
+                session_string=session_string,
                 expires_at=expires_at,
             )

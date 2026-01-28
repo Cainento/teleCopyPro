@@ -7,9 +7,6 @@ from telethon.errors import (
     FloodWaitError,
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
-    FloodWaitError,
-    phone_code_invalid_error,
-    PhoneNumberInvalidError,
     SessionPasswordNeededError,
     AuthKeyUnregisteredError,
 )

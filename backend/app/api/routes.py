@@ -119,17 +119,16 @@ async def send_code(
             await session_service.remove_temp_session(phone_number, db)
 
         # Send verification code
-        phone_code_hash, session_filename = await telegram_service.send_verification_code(
+        phone_code_hash, session_string = await telegram_service.send_verification_code(
             phone_number, api_id, api_hash, db
         )
 
-        # Get actual session file path (might be unique if default was locked)
-        session_file_path = f"{session_filename}.session"
+        logger.info(f"[SEND_CODE] Session string received (len={len(session_string) if session_string else 0})")
 
-        # Create temporary session in database (stores phone_code_hash for later use)
+        # Create temporary session in database (stores phone_code_hash and session_string for later use)
         await session_service.create_temp_session(
             phone_number, api_id, api_hash, phone_code_hash, db,
-            session_file_path=session_file_path
+            session_string=session_string
         )
 
         return JSONResponse(
@@ -178,11 +177,13 @@ async def sign_in(
         phone_code_hash = temp_session["phone_code_hash"]
         api_id = temp_session["api_id"]
         api_hash = temp_session["api_hash"]
-        session_file_path = temp_session.get("session_file_path")
+        session_string = temp_session.get("session_string")
+        
+        logger.info(f"[SIGN_IN] Retrieved session_string for {phone_number} (len={len(session_string) if session_string else 0})")
 
-        # Recreate client from session file (session file was created during send_code)
+        # Recreate client from session string
         client = await telegram_service.get_or_create_client(
-            phone_number, api_id, api_hash, db, session_file_path=session_file_path
+            phone_number, api_id, api_hash, db, session_string=session_string
         )
 
         # Verify code
@@ -190,6 +191,10 @@ async def sign_in(
             user_info = await telegram_service.verify_code(
                 client, phone_number, phone_code, phone_code_hash
             )
+            
+            # Extract updated session_string after successful sign-in
+            final_session_string = client.session.save()
+            logger.info(f"[SIGN_IN] Final session_string saved (len={len(final_session_string) if final_session_string else 0})")
 
             # Remove temporary session from database (login successful)
             await session_service.remove_temp_session(phone_number, db)
@@ -198,7 +203,7 @@ async def sign_in(
             display_name = user_info.get("username") or user_info.get("first_name")
             user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
-            # Create/update session in database to persist API credentials
+            # Create/update session in database to persist API credentials and session_string
             try:
                 await session_service.create_or_update_db_session(
                     user_id=user.id,
@@ -206,7 +211,7 @@ async def sign_in(
                     api_id=api_id,
                     api_hash=api_hash,
                     db=db,
-                    session_file_path=session_file_path
+                    session_string=final_session_string
                 )
                 logger.info(f"Session credentials saved to database for {phone_number}")
             except Exception as db_err:
@@ -286,15 +291,19 @@ async def sign_in_2fa(
 
         api_id = temp_session["api_id"]
         api_hash = temp_session["api_hash"]
-        session_file_path = temp_session.get("session_file_path")
+        session_string = temp_session.get("session_string")
 
-        # Recreate client from session file (session was created during send_code)
+        # Recreate client from session string
         client = await telegram_service.get_or_create_client(
-            phone_number, api_id, api_hash, db, session_file_path=session_file_path
+            phone_number, api_id, api_hash, db, session_string=session_string
         )
 
         # Verify 2FA password
         user_info = await telegram_service.verify_2fa_password(client, password, phone_number)
+        
+        # Extract updated session_string after successful 2FA
+        final_session_string = client.session.save()
+        logger.info(f"[SIGN_IN_2FA] Final session_string saved (len={len(final_session_string) if final_session_string else 0})")
 
         # Remove temporary session from database
         await session_service.remove_temp_session(phone_number, db)
@@ -303,7 +312,7 @@ async def sign_in_2fa(
         display_name = user_info.get("username") or user_info.get("first_name")
         user = await user_service.get_or_create_user_by_phone(phone_number, display_name)
 
-        # Create/update session in database to persist API credentials
+        # Create/update session in database to persist API credentials and session_string
         try:
             await session_service.create_or_update_db_session(
                 user_id=user.id,
@@ -311,7 +320,7 @@ async def sign_in_2fa(
                 api_id=api_id,
                 api_hash=api_hash,
                 db=db,
-                session_file_path=session_file_path
+                session_string=final_session_string
             )
             logger.info(f"Session credentials saved to database for {phone_number}")
         except Exception as db_err:
@@ -1336,6 +1345,10 @@ async def stripe_webhook(
             # Payment failed
             await stripe_service.handle_invoice_payment_failed(event_data)
 
+        elif event_type == "invoice.paid":
+            # Invoice paid - save to database for sales tracking
+            await stripe_service.handle_invoice_paid(event_data)
+
         else:
             logger.info(f"Unhandled Stripe webhook event type: {event_type}")
 
@@ -1457,6 +1470,67 @@ async def process_subscription_manually(
         logger.error(f"Error in process_subscription_manually: {e}", exc_info=True)
         raise TeleCopyException(f"Erro ao processar assinatura: {str(e)}", 500)
 
+
+@admin_router.post("/sync-stripe-invoices")
+async def sync_stripe_invoices(
+    current_user: PydanticUser = Depends(get_current_user),
+    stripe_service: StripeService = Depends(get_stripe_service),
+):
+    """
+    Sync all paid Stripe invoices to the database.
+    This is useful for backfilling historical invoices that were paid
+    before the invoice tracking feature was implemented.
+    
+    Requires admin privileges.
+    """
+    if not current_user.is_admin:
+        raise TeleCopyException("Acesso negado. Apenas administradores.", 403)
+    
+    try:
+        import stripe
+        from app.database.models import Invoice
+        from sqlalchemy import select
+        
+        synced_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        # Get all paid invoices from Stripe
+        invoices = stripe.Invoice.list(status="paid", limit=100)
+        
+        for invoice in invoices.auto_paging_iter():
+            try:
+                # Check if invoice already exists
+                existing = await stripe_service.db.execute(
+                    select(Invoice).where(Invoice.stripe_invoice_id == invoice.id)
+                )
+                if existing.scalar_one_or_none():
+                    skipped_count += 1
+                    continue
+                
+                # Process the invoice
+                await stripe_service.handle_invoice_paid(invoice)
+                synced_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error syncing invoice {invoice.id}: {e}")
+                error_count += 1
+                continue
+        
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": f"Sync completed",
+                "synced": synced_count,
+                "skipped": skipped_count,
+                "errors": error_count
+            },
+            status_code=200
+        )
+        
+    except Exception as e:
+        logger.error(f"Error syncing Stripe invoices: {e}", exc_info=True)
+        raise TeleCopyException(f"Erro ao sincronizar faturas: {str(e)}", 500)
 
 
 # ==================== Admin Routes ====================

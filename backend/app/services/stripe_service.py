@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.exceptions import TeleCopyException
-from app.database.models import User
+from app.database.models import User, Invoice
 from app.database.repositories.user_repository import UserRepository
 from app.models.user import UserPlan
 from app.services.telegram_service import TelegramService
@@ -495,6 +495,75 @@ class StripeService:
         except Exception as e:
             logger.error(f"Error handling invoice payment failure: {e}")
             raise
+
+    async def handle_invoice_paid(self, invoice: stripe.Invoice) -> None:
+        """
+        Handle successful invoice payment and save to database.
+
+        Args:
+            invoice: Stripe Invoice object
+        """
+        try:
+            # Get user by customer ID
+            customer_id = invoice.customer
+            user = await self.user_repo.get_by_stripe_customer_id(customer_id)
+
+            if not user:
+                logger.error(f"User not found for Stripe customer {customer_id}")
+                return
+
+            # Check if invoice already exists in database
+            from sqlalchemy import select
+            existing = await self.db.execute(
+                select(Invoice).where(Invoice.stripe_invoice_id == invoice.id)
+            )
+            if existing.scalar_one_or_none():
+                logger.info(f"Invoice {invoice.id} already exists in database, skipping")
+                return
+
+            # Extract invoice details
+            # Stripe amounts are in cents, convert to currency
+            amount = invoice.amount_paid / 100 if invoice.amount_paid else 0
+            currency = (invoice.currency or "brl").upper()
+            
+            # Get subscription ID if available
+            subscription_id = invoice.subscription if hasattr(invoice, 'subscription') else None
+            
+            # Get paid timestamp
+            paid_at = None
+            if hasattr(invoice, 'status_transitions') and invoice.status_transitions:
+                paid_timestamp = invoice.status_transitions.paid_at
+                if paid_timestamp:
+                    paid_at = datetime.utcfromtimestamp(paid_timestamp)
+            
+            # If no paid_at from status_transitions, use current time for paid invoices
+            if paid_at is None and invoice.status == "paid":
+                paid_at = datetime.utcnow()
+
+            # Create invoice record
+            db_invoice = Invoice(
+                user_id=user.id,
+                stripe_invoice_id=invoice.id,
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                amount=amount,
+                currency=currency,
+                status=invoice.status or "paid",
+                invoice_url=invoice.hosted_invoice_url if hasattr(invoice, 'hosted_invoice_url') else None,
+                invoice_pdf=invoice.invoice_pdf if hasattr(invoice, 'invoice_pdf') else None,
+                paid_at=paid_at,
+                created_at=datetime.utcnow()
+            )
+
+            self.db.add(db_invoice)
+            await self.db.commit()
+
+            logger.info(f"Saved invoice {invoice.id} for user {user.id}, amount={amount} {currency}")
+
+        except Exception as e:
+            logger.error(f"Error handling invoice paid: {e}", exc_info=True)
+            # Don't re-raise to avoid breaking the webhook response
+            await self.db.rollback()
 
     def get_price_id_for_plan(self, plan: UserPlan, is_annual: bool = False) -> Optional[str]:
         """

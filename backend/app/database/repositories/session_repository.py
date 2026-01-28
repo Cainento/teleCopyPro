@@ -20,15 +20,15 @@ class SessionRepository:
         self,
         user_id: int,
         phone_number: str,
-        session_file_path: str,
         api_id: str,
         api_hash: str,
+        session_string: Optional[str] = None,
     ) -> TelegramSession:
         """Create a new Telegram session."""
         session = TelegramSession(
             user_id=user_id,
             phone_number=phone_number,
-            session_file_path=session_file_path,
+            session_string=session_string,
             api_id=api_id,
             api_hash=api_hash,
             is_active=True,
