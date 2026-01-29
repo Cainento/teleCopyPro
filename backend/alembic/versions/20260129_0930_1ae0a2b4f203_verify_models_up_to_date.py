@@ -24,7 +24,8 @@ def upgrade() -> None:
         batch_op.alter_column('plan',
                existing_type=sa.VARCHAR(length=50),
                type_=sa.Enum('free', 'premium', 'enterprise', name='userplan'),
-               existing_nullable=False)
+               existing_nullable=False,
+               postgresql_using="plan::userplan")
 
     # ### end Alembic commands ###
 
