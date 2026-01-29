@@ -289,7 +289,15 @@ class CopyService:
                 )
 
             if not await client.is_user_authorized():
-                raise SessionError("Session não autorizada. Por favor, refaça o login.")
+                # For StringSession, is_user_authorized() may return False even for valid sessions
+                # Try get_me() to actually verify with Telegram servers
+                try:
+                    me = await client.get_me()
+                    if not me:
+                        raise SessionError("Session não autorizada. Por favor, refaça o login.")
+                except Exception as auth_error:
+                    logger.error(f"Session authorization check failed: {auth_error}")
+                    raise SessionError("Session não autorizada. Por favor, refaça o login.")
 
             # Disable Telethon's auto-sleep so our code handles FloodWait and updates the UI
             client.flood_sleep_threshold = 0
@@ -520,7 +528,15 @@ class CopyService:
                 )
 
             if not await client.is_user_authorized():
-                raise SessionError("Session não autorizada. Por favor, refaça o login.")
+                # For StringSession, is_user_authorized() may return False even for valid sessions
+                # Try get_me() to actually verify with Telegram servers
+                try:
+                    me = await client.get_me()
+                    if not me:
+                        raise SessionError("Session não autorizada. Por favor, refaça o login.")
+                except Exception as auth_error:
+                    logger.error(f"Session authorization check failed: {auth_error}")
+                    raise SessionError("Session não autorizada. Por favor, refaça o login.")
 
             # Get entities
             source_id = source_channel

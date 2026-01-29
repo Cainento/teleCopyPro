@@ -30,11 +30,11 @@ const PERIOD_OPTIONS: { label: string; value: PeriodOption }[] = [
 ];
 
 const COLORS = {
-    primary: '#6366f1',
+    primary: '#1e40af', // Dark Blue for Total Revenue (distinct from Stripe)
     secondary: '#22c55e',
     accent: '#f59e0b',
-    stripe: '#635bff',
-    pix: '#00d4aa',
+    stripe: '#635bff', // Stripe Blurple
+    pix: '#00d4aa',    // Pix Teal
     premium: '#3b82f6',
     enterprise: '#a855f7',
 };

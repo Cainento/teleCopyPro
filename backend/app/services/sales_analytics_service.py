@@ -90,7 +90,10 @@ class SalesAnalyticsService:
         total_users = await self.db.scalar(select(func.count(DBUser.id))) or 0
         paid_users = await self.db.scalar(
             select(func.count(DBUser.id))
-            .where(cast(DBUser.plan, String).in_([UserPlan.PREMIUM.value, UserPlan.ENTERPRISE.value]))
+            .where(
+                cast(DBUser.plan, String).in_([UserPlan.PREMIUM.value, UserPlan.ENTERPRISE.value]),
+                (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
+            )
         ) or 0
         free_users = total_users - paid_users
         
@@ -260,25 +263,29 @@ class SalesAnalyticsService:
         # Premium Monthly ~59.90, Annual ~599.00
         # Enterprise Monthly ~99.90, Annual ~999.00
         
-        # Get all paid Stripe invoices
+        # For Stripe, we join with User table to get the actual plan
         stripe_invoices_result = await self.db.execute(
-            select(Invoice.amount).where(Invoice.status == "paid")
+            select(Invoice.amount, DBUser.plan)
+            .join(DBUser, Invoice.user_id == DBUser.id)
+            .where(Invoice.status == "paid")
         )
-        stripe_invoices = stripe_invoices_result.scalars().all()
+        stripe_invoices = stripe_invoices_result.all()
         
         stripe_premium = 0.0
         stripe_enterprise = 0.0
         
-        for amount in stripe_invoices:
-            # Classify based on amount thresholds
-            if amount <= 100:  # Premium monthly
+        for amount, plan in stripe_invoices:
+            if plan == UserPlan.PREMIUM:
                 stripe_premium += float(amount)
-            elif amount <= 150:  # Enterprise monthly
+            elif plan == UserPlan.ENTERPRISE:
                 stripe_enterprise += float(amount)
-            elif amount <= 650:  # Premium annual
-                stripe_premium += float(amount)
-            else:  # Enterprise annual
-                stripe_enterprise += float(amount)
+            else:
+                # Fallback for users who might have downgraded or have unknown plan
+                # Assign to plan based on amount as best effort
+                if float(amount) <= 100 or float(amount) == 599.0:  # Premium
+                    stripe_premium += float(amount)
+                else:  # Enterprise
+                    stripe_enterprise += float(amount)
         
         premium_total = stripe_premium + (pix_premium_centavos / 100)
         enterprise_total = stripe_enterprise + (pix_enterprise_centavos / 100)

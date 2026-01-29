@@ -14,6 +14,7 @@ from telethon.errors import (
     PhoneNumberInvalidError,
     SessionPasswordNeededError,
     AuthKeyUnregisteredError,
+    AuthKeyDuplicatedError,
 )
 from app.database.connection import AsyncSessionLocal
 from telethon.sessions import StringSession
@@ -46,6 +47,7 @@ class TelegramService:
         self._locks: dict[str, asyncio.Lock] = {} # session_name -> asyncio.Lock
         self._real_time_handlers: dict[str, dict] = {}  # job_id -> {handler, phone_number}
         self._session_credentials: dict[str, dict[str, any]] = {}  # phone_number -> {api_id, api_hash}
+        self._session_auth_times: dict[str, datetime] = {}  # session_name -> last auth time
         self._monitor_task: Optional[asyncio.Task] = None
         self._session_path = Path(settings.session_folder)
         self._session_path.mkdir(parents=True, exist_ok=True)
@@ -279,8 +281,17 @@ class TelegramService:
                     logger.info(f"[GET_OR_CREATE_CLIENT] Reconnecting existing client for {phone_number}")
                     await client.connect()
                     return client
+                except AuthKeyDuplicatedError as e:
+                    # Session was used from multiple IPs - it's permanently invalidated
+                    # Remove from active clients and raise the error - don't try to create a new client
+                    logger.error(f"[GET_OR_CREATE_CLIENT] Session {session_key} invalidated (AuthKeyDuplicatedError)")
+                    if session_key in self._active_clients:
+                        self._active_clients.pop(session_key, None)
+                    raise  # Re-raise to be handled at a higher level
                 except Exception as e:
                     logger.warning(f"[GET_OR_CREATE_CLIENT] Failed to reconnect: {e}, creating new one")
+                    # Remove the broken client from active_clients before creating a new one
+                    self._active_clients.pop(session_key, None)
 
             logger.info(f"[GET_OR_CREATE_CLIENT] Session {session_key} NOT found in active_clients. Available: {list(self._active_clients.keys())}")
 
@@ -292,7 +303,12 @@ class TelegramService:
                 logger.info(f"[GET_OR_CREATE_CLIENT] Creating client with new StringSession for {phone_number}")
                 client = await self.create_client(api_id, api_hash, phone_number=phone_number)
             
-            await client.connect()
+            try:
+                await client.connect()
+            except AuthKeyDuplicatedError:
+                logger.error(f"[GET_OR_CREATE_CLIENT] Session {session_key} invalidated during connect (AuthKeyDuplicatedError)")
+                raise  # Re-raise to be handled at a higher level
+            
             logger.debug(f"[GET_OR_CREATE_CLIENT] Client connected: {client.is_connected()}")
 
             # Store active client
@@ -353,6 +369,10 @@ class TelegramService:
             # Store client in active_clients for reuse in verify_code
             self._active_clients[session_key] = client
             logger.info(f"Registered client for {phone_number} in active_clients")
+            
+            # Record creation time for grace period protection
+            # This prevents the session monitor from cleaning up before user enters code
+            self._session_auth_times[session_key] = datetime.utcnow()
 
             # Keep client connected for verify_code to reuse
             logger.info(f"Verification code sent to {phone_number}")
@@ -429,9 +449,13 @@ class TelegramService:
                 "api_id": client.api_id,
                 "api_hash": client.api_hash
             }
+            
+            # Record auth time for grace period protection
+            self._session_auth_times[session_name] = datetime.utcnow()
 
-            is_authorized = await client.is_user_authorized()
-            logger.info(f"User {phone_number} authenticated successfully, authorized: {is_authorized}")
+            # Use get_me() to verify - more reliable than is_user_authorized() for StringSession
+            me = await client.get_me()
+            logger.info(f"User {phone_number} authenticated successfully, authorized: {me is not None}")
 
             return {
                 "user_id": user.id,
@@ -500,9 +524,13 @@ class TelegramService:
                     "api_id": client.api_id,
                     "api_hash": client.api_hash
                 }
+                
+                # Record auth time for grace period protection
+                self._session_auth_times[session_name] = datetime.utcnow()
 
-                is_authorized = await client.is_user_authorized()
-                logger.info(f"2FA authentication successful for {phone_number}, authorized: {is_authorized}")
+                # Use get_me() to verify - more reliable than is_user_authorized() for StringSession
+                me = await client.get_me()
+                logger.info(f"2FA authentication successful for {phone_number}, authorized: {me is not None}")
 
             return {
                 "user_id": user.id,
@@ -574,9 +602,17 @@ class TelegramService:
             api_hash = api_hash or settings.api_hash
 
         session_name = self._get_session_name(phone_number, api_id, api_hash)
-        session_path = self._get_session_path(session_name)
 
-        if not session_path.exists():
+        # Check if we have a session (either in memory or in database)
+        session_repo = self._get_session_repo(db)
+        try:
+            db_session = await session_repo.get_by_phone(phone_number)
+        except Exception as e:
+            logger.error(f"[CHECK_SESSION] Error getting session from database: {e}", exc_info=True)
+            db_session = None
+        
+        # If no session in database and no active client, session doesn't exist
+        if not db_session and session_name not in self._active_clients:
             return TelegramSession(
                 session_name=session_name,
                 phone_number=phone_number,
@@ -588,20 +624,33 @@ class TelegramService:
 
         try:
             client = await self.get_or_create_client(phone_number, api_id, api_hash, db)
-            is_authorized = await client.is_user_authorized()
-
-            if is_authorized:
+            
+            # For StringSession, is_user_authorized() may return False even for valid sessions
+            # because _self_id isn't set until get_me() is called.
+            # Try get_me() directly - if it succeeds, the session is authorized.
+            try:
                 me = await client.get_me()
-                return TelegramSession(
-                    session_name=session_name,
-                    phone_number=phone_number,
-                    api_id=api_id,
-                    api_hash=api_hash,
-                    status=SessionStatus.CONNECTED,
-                    user_id=me.id,
-                    is_authorized=True
-                )
-            else:
+                if me:
+                    return TelegramSession(
+                        session_name=session_name,
+                        phone_number=phone_number,
+                        api_id=api_id,
+                        api_hash=api_hash,
+                        status=SessionStatus.CONNECTED,
+                        user_id=me.id,
+                        is_authorized=True
+                    )
+                else:
+                    return TelegramSession(
+                        session_name=session_name,
+                        phone_number=phone_number,
+                        api_id=api_id,
+                        api_hash=api_hash,
+                        status=SessionStatus.DISCONNECTED,
+                        is_authorized=False
+                    )
+            except AuthKeyUnregisteredError:
+                logger.warning(f"Session {session_name} auth key is unregistered")
                 return TelegramSession(
                     session_name=session_name,
                     phone_number=phone_number,
@@ -611,6 +660,16 @@ class TelegramService:
                     is_authorized=False
                 )
 
+        except AuthKeyDuplicatedError:
+            logger.error(f"Session {session_name} invalidated: Auth key duplicated (used in multiple locations). Marking as disconnected.")
+            return TelegramSession(
+                session_name=session_name,
+                phone_number=phone_number,
+                api_id=api_id,
+                api_hash=api_hash,
+                status=SessionStatus.DISCONNECTED,
+                is_authorized=False
+            )
         except Exception as e:
             logger.error(f"Error checking session status: {e}", exc_info=True)
             return TelegramSession(
@@ -824,9 +883,20 @@ class TelegramService:
                     
                 # We can check authorization status
                 # If this raises AuthKeyUnregisteredError, the session is dead
+                # For StringSession, is_user_authorized() may return False even for valid sessions
+                # Use get_me() instead which actually verifies with Telegram servers
                 try:
-                    is_auth = await client.is_user_authorized()
+                    me = await client.get_me()
+                    is_auth = me is not None
                     if not is_auth:
+                        # Check grace period - skip cleanup for recently authenticated sessions
+                        auth_time = self._session_auth_times.get(session_name)
+                        if auth_time:
+                            grace_period = timedelta(minutes=5)
+                            if datetime.utcnow() - auth_time < grace_period:
+                                logger.debug(f"Session {session_name} appears unauthorized but within grace period - skipping cleanup")
+                                continue
+                        
                         # Hybrid Approach: Only clean up if NO active jobs
                         # This protects background jobs from false-negative authorization checks
                         should_cleanup = True
