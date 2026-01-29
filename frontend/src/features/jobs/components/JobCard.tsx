@@ -14,15 +14,9 @@ import {
   PlayCircle,
   Copy,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/cn';
+import { formatRelativeTime } from '@/lib/formatters';
 import type { Job } from '@/api/types';
-
-const parseUTCTimestamp = (timestamp: string) => {
-  const utcTimestamp = timestamp.endsWith('Z') ? timestamp : `${timestamp}Z`;
-  return new Date(utcTimestamp);
-};
 
 interface JobCardProps {
   job: Job;
@@ -182,10 +176,7 @@ export const JobCard = memo(function JobCard({
             {job.created_at && (
               <span>
                 Criado{' '}
-                {formatDistanceToNow(parseUTCTimestamp(job.created_at), {
-                  addSuffix: true,
-                  locale: ptBR,
-                })}
+                {formatRelativeTime(job.created_at)}
               </span>
             )}
           </div>

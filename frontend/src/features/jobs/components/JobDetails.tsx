@@ -2,20 +2,13 @@ import { motion } from 'framer-motion';
 import {
   ArrowLeft, Clock, Zap, Hash, Image, ArrowRight,
   MessageSquare, AlertCircle, CheckCircle, XCircle,
-  StopCircle, PauseCircle, Calendar, RefreshCw, Copy
+  StopCircle, PauseCircle, Calendar, RefreshCw
 } from 'lucide-react';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
 import { JobControls } from './JobControls';
 import { cn } from '@/lib/cn';
+import { formatDate } from '@/lib/formatters';
 import type { Job } from '@/api/types';
-
-const formatLocalTime = (timestamp: string) => {
-  const utcTimestamp = timestamp.endsWith('Z') ? timestamp : `${timestamp}Z`;
-  const localDate = new Date(utcTimestamp);
-  return format(localDate, "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR });
-};
 
 interface JobDetailsProps {
   job: Job;
@@ -304,7 +297,7 @@ export function JobDetails({
                 </div>
                 <span className="text-sm text-muted-foreground">Criado em</span>
               </div>
-              <p className="font-semibold">{formatLocalTime(job.created_at)}</p>
+              <p className="font-semibold">{formatDate(job.created_at)}</p>
             </div>
           )}
 
@@ -316,7 +309,7 @@ export function JobDetails({
                 </div>
                 <span className="text-sm text-muted-foreground">Última atualização</span>
               </div>
-              <p className="font-semibold">{formatLocalTime(job.completed_at || job.started_at!)}</p>
+              <p className="font-semibold">{formatDate(job.completed_at || job.started_at!)}</p>
             </div>
           )}
         </div>

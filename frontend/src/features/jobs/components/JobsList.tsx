@@ -201,7 +201,13 @@ export function JobsList({
             animate="visible"
           >
             {filteredJobs.map((job) => (
-              <motion.div key={job.id} variants={fadeInUp} layout>
+              <motion.div
+                key={job.id}
+                variants={fadeInUp}
+                initial="hidden"
+                animate="visible"
+                layout
+              >
                 <JobCard
                   job={job}
                   onStop={onStop}

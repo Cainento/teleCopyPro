@@ -3,11 +3,15 @@ import { ptBR } from 'date-fns/locale';
 
 export function formatDate(date: Date | string | number): string {
   const dateObj = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
+  if (isNaN(dateObj.getTime())) return '-';
   return format(dateObj, 'dd/MM/yyyy HH:mm', { locale: ptBR });
 }
 
-export function formatRelativeTime(date: Date | string | number): string {
+export function formatRelativeTime(date: Date | string | number | null | undefined): string {
+  if (!date) return '-';
   const dateObj = typeof date === 'string' || typeof date === 'number' ? new Date(date) : date;
+
+  if (isNaN(dateObj.getTime())) return '-';
 
   if (isToday(dateObj)) {
     return `Hoje às ${format(dateObj, 'HH:mm')}`;
