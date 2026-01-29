@@ -554,6 +554,8 @@ async def list_jobs(
         phone_number = current_user.phone_number
         jobs = await copy_service.get_user_jobs(phone_number)
 
+        from datetime import timezone
+
         def format_timestamp(ts):
             """Format timestamp, handling both datetime and float (legacy) values."""
             if ts is None:
@@ -561,6 +563,9 @@ async def list_jobs(
             if isinstance(ts, str):
                 return ts
             if hasattr(ts, 'isoformat'):
+                # Ensure timezone info is present (assume UTC if missing)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
                 return ts.isoformat()
             # Legacy float timestamp - skip it
             return None
@@ -618,6 +623,8 @@ async def get_job_status(
         if job.phone_number != current_user.phone_number:
             raise TeleCopyException("Acesso negado a este job.", 403)
 
+        from datetime import timezone
+
         def format_timestamp(ts):
             """Format timestamp, handling both datetime and float (legacy) values."""
             if ts is None:
@@ -625,6 +632,9 @@ async def get_job_status(
             if isinstance(ts, str):
                 return ts
             if hasattr(ts, 'isoformat'):
+                # Ensure timezone info is present (assume UTC if missing)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
                 return ts.isoformat()
             # Legacy float timestamp - skip it
             return None

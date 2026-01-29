@@ -92,7 +92,7 @@ class SalesAnalyticsService:
             select(func.count(DBUser.id))
             .where(
                 cast(DBUser.plan, String).in_([UserPlan.PREMIUM.value, UserPlan.ENTERPRISE.value]),
-                (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
+                DBUser.plan_expiry > now
             )
         ) or 0
         free_users = total_users - paid_users
@@ -316,7 +316,7 @@ class SalesAnalyticsService:
             select(func.count(DBUser.id))
             .where(
                 cast(DBUser.plan, String) == UserPlan.PREMIUM.value,
-                (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
+                DBUser.plan_expiry > now
             )
         ) or 0
         
@@ -324,7 +324,7 @@ class SalesAnalyticsService:
             select(func.count(DBUser.id))
             .where(
                 cast(DBUser.plan, String) == UserPlan.ENTERPRISE.value,
-                (DBUser.plan_expiry.is_(None)) | (DBUser.plan_expiry > now)
+                DBUser.plan_expiry > now
             )
         ) or 0
         

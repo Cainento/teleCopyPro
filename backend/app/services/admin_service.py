@@ -42,9 +42,24 @@ class AdminService:
             Dictionary with statistics
         """
         # User stats
+        now = datetime.utcnow()
+        paid_filter_base = [DBUser.plan_expiry > now]
+
         total_users = await self.db.scalar(select(func.count(DBUser.id)))
-        premium_users = await self.db.scalar(select(func.count(DBUser.id)).where(DBUser.plan == UserPlan.PREMIUM))
-        enterprise_users = await self.db.scalar(select(func.count(DBUser.id)).where(DBUser.plan == UserPlan.ENTERPRISE))
+        premium_users = await self.db.scalar(
+            select(func.count(DBUser.id))
+            .where(
+                DBUser.plan == UserPlan.PREMIUM,
+                *paid_filter_base
+            )
+        )
+        enterprise_users = await self.db.scalar(
+            select(func.count(DBUser.id))
+            .where(
+                DBUser.plan == UserPlan.ENTERPRISE,
+                *paid_filter_base
+            )
+        )
         
         # Job stats
         total_jobs = await self.db.scalar(select(func.count(DBCopyJob.id)))

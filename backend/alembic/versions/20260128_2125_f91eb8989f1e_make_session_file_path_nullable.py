@@ -20,9 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Make session_file_path nullable since we now use session_string (StringSession)
-    op.alter_column('telegram_sessions', 'session_file_path',
-                    existing_type=sa.VARCHAR(),
-                    nullable=True)
+    with op.batch_alter_table('telegram_sessions', schema=None) as batch_op:
+        batch_op.alter_column('session_file_path',
+                              existing_type=sa.VARCHAR(),
+                              nullable=True)
 
 
 def downgrade() -> None:

@@ -1,6 +1,6 @@
 """SQLAlchemy database models for Telegram Copier."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import Boolean, Column, DateTime, Enum as SQLEnum, ForeignKey, Integer, String, Text, Float
@@ -96,10 +96,10 @@ class CopyJob(Base):
     status_message = Column(Text, nullable=True)
 
     # Timestamps (using Python datetime.now for database compatibility)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
-    stopped_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    stopped_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     user = relationship("User", back_populates="copy_jobs")

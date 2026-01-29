@@ -1,6 +1,6 @@
 """Copy job data model."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -45,14 +45,14 @@ class CopyJob(CopyJobBase):
     status_message: Optional[str] = Field(None, description="Current status message (e.g. wait time)")
     started_at: Optional[datetime] = Field(None, description="Job start time")
     completed_at: Optional[datetime] = Field(None, description="Job completion time")
-    created_at: datetime = Field(default_factory=datetime.utcnow, description="Job creation date")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Job creation date")
 
     class Config:
         """Pydantic config."""
 
         use_enum_values = True
         json_encoders = {
-            datetime: lambda v: v.isoformat()
+            datetime: lambda v: (v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v).isoformat()
         }
 
 

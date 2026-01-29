@@ -1,6 +1,6 @@
 """Copy job repository for database operations."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from sqlalchemy import select
@@ -101,7 +101,7 @@ class JobRepository:
         """Count historical jobs created today by user."""
         from sqlalchemy import func
 
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
         result = await self.db.execute(
             select(func.count(CopyJob.id)).where(
@@ -136,16 +136,16 @@ class JobRepository:
              pass
 
         if status == "running" and job.started_at is None:
-            job.started_at = datetime.utcnow()
+            job.started_at = datetime.now(timezone.utc)
         elif status == "completed":
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
             job.progress_percentage = 100.0
             job.status_message = None # Clear status message on completion
         elif status == "stopped":
-            job.stopped_at = datetime.utcnow()
+            job.stopped_at = datetime.now(timezone.utc)
             job.status_message = None # Clear status message on stop
         elif status == "failed":
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
             job.error_message = error_message
             # Keep status message if it explains failure? Or clear?
             # job.status_message = None
