@@ -19,7 +19,11 @@ from telethon.errors import (
     FloodWaitError, 
     AuthKeyUnregisteredError, 
     ChannelPrivateError,
-    ChatForwardsRestrictedError
+    ChatForwardsRestrictedError,
+    ChatWriteForbiddenError,
+    PeerIdInvalidError,
+    SessionRevokedError,
+    UserDeactivatedBanError,
 )
 from telethon.tl.types import MessageService
 
@@ -146,10 +150,10 @@ class CopyService:
                 # Don't increment retry count for FloodWait, we must wait it out
                 continue
 
-            except (ChannelPrivateError, ChatForwardsRestrictedError) as e:
+            except (ChannelPrivateError, ChatForwardsRestrictedError, ChatWriteForbiddenError, PeerIdInvalidError) as e:
                 # Fatal errors - do not retry, stop the job
-                logger.error(f"Permission error: {e}")
-                raise CopyServiceError(f"Erro de permissão: O canal é privado ou possui restrição de encaminhamento (conteúdo protegido).") from e
+                logger.error(f"Permission/Peer error: {e}")
+                raise CopyServiceError(f"Erro: O canal/chat de destino é inválido, não existe ou você não tem permissão de acesso.") from e
                 
             except Exception as e:
                 retry_count += 1
@@ -647,8 +651,35 @@ class CopyService:
                                      logger.error(f"[Handler {job_id}] Failed to remove self: {remove_error}")
                                  return
                             else:
-                                 logger.warning(f"[Handler {job_id}] Job status {fresh_job.status} unknown, skipping message")
+                                 logger.warning(f"Job status {fresh_job.status} unknown, skipping message")
                                  return
+                    except (AuthKeyUnregisteredError, SessionRevokedError, UserDeactivatedBanError):
+                        logger.error(f"[Handler {job_id}] Session revoked/banned during message forward. Failing job.")
+                        try:
+                            # Update database with failure
+                            handler_repo = JobRepository(handler_db)
+                            fresh_job = await handler_repo.get_by_id(job_id)
+                            # Verify status again
+                            if fresh_job and fresh_job.status == "running":
+                                await handler_repo.update_status(fresh_job, "failed", error_message="Sessão revogada/inválida. Faça login novamente.")
+                                # Remove handler immediately
+                                try:
+                                    client.remove_event_handler(message_handler)
+                                except:
+                                    pass
+                                return
+                        except Exception as e:
+                            logger.error(f"Error failing job for revoked session: {e}")
+                        
+                        # Trigger cleanup (background check will also catch it, but this is faster)
+                        try:
+                            # Just log, we can't easily access services here without circular deps or dependency injection
+                            # The monitor will kill the session shortly because we failed the job
+                            logger.info(f"Triggering session cleanup via monitor for {phone_number}")
+                        except:
+                            pass
+                        
+                        return
                     except Exception as e:
                         try:
                             # Update database with failure

@@ -15,6 +15,8 @@ from telethon.errors import (
     SessionPasswordNeededError,
     AuthKeyUnregisteredError,
     AuthKeyDuplicatedError,
+    SessionRevokedError,
+    UserDeactivatedBanError,
 )
 from app.database.connection import AsyncSessionLocal
 from telethon.sessions import StringSession
@@ -897,50 +899,11 @@ class TelegramService:
                                 logger.debug(f"Session {session_name} appears unauthorized but within grace period - skipping cleanup")
                                 continue
                         
-                        # Hybrid Approach: Only clean up if NO active jobs
-                        # This protects background jobs from false-negative authorization checks
-                        should_cleanup = True
-                        
-                        try:
-                            # Extract phone number from session name
-                            # Format: phone_hash or phone_hash_timestamp or phone
-                            # We assume the part before the first underscore is the phone number (with or without +)
-                            phone_part = session_name.split('_')[0]
-                            # Add + if missing (Telegram format)
-                            if not phone_part.startswith('+'):
-                                phone_part = f"+{phone_part}"
-                                
-                            from app.database.connection import AsyncSessionLocal
-                            from app.database.repositories.user_repository import UserRepository
-                            from app.database.repositories.job_repository import JobRepository
-                            
-                            async with AsyncSessionLocal() as db:
-                                user_repo = UserRepository(db)
-                                job_repo = JobRepository(db)
-                                
-                                user = await user_repo.get_by_phone(phone_part)
-                                if user:
-                                    active_jobs = await job_repo.get_active_jobs_by_user(user.id)
-                                    if active_jobs:
-                                        logger.warning(f"Session {session_name} reported unauthorized, but user has {len(active_jobs)} active jobs. SKIPPING cleanup to protect jobs.")
-                                        should_cleanup = False
-                                    else:
-                                        logger.info(f"Session {session_name} unauthorized and no active jobs found. Proceeding with cleanup.")
-                                else:
-                                    logger.warning(f"Could not find user for session {session_name} (phone: {phone_part}). Proceeding with cleanup.")
-                                    
-                        except Exception as e:
-                            logger.error(f"Error checking active jobs during session cleanup: {e}. Defaulting to NO cleanup for safety.")
-                            should_cleanup = False
+                        logger.warning(f"Session {session_name} is no longer authorized. creating cleanup task.")
+                        await self._handle_revoked_session_by_name(session_name)
 
-                        if should_cleanup:
-                            logger.warning(f"Session {session_name} is no longer authorized. creating cleanup task.")
-                            await self._handle_revoked_session_by_name(session_name)
-                        else:
-                            pass # Skip cleanup
-
-                except AuthKeyUnregisteredError:
-                    logger.warning(f"Session {session_name} revoked (AuthKeyUnregisteredError). Cleaning up.")
+                except (AuthKeyUnregisteredError, SessionRevokedError, UserDeactivatedBanError):
+                    logger.warning(f"Session {session_name} revoked. Cleaning up.")
                     await self._handle_revoked_session_by_name(session_name)
                     
             except Exception as e:
@@ -948,7 +911,7 @@ class TelegramService:
                 logger.debug(f"Error checking session {session_name}: {e}")
 
     async def _handle_revoked_session_by_name(self, session_name: str) -> None:
-        """Handle cleanup for a specific revoked session name."""
+        """Handle cleanup for a specific revoked session name and fail associated jobs."""
         try:
             # 1. Disconnect client
             if session_name in self._active_clients:
@@ -967,25 +930,38 @@ class TelegramService:
                 except Exception as e:
                     logger.error(f"Failed to delete revoked session file: {e}")
 
-            # 3. Clean up database
-            # We need to find the phone number associated effectively.
-            # Since we don't have a direct map from session_name -> phone here easily without parsing,
-            # we can try to guess or just leave the DB in a 'broken' state until next login fixes it,
-            # BUT it's better to clean it up.
-            
-            # Heuristic: verify against all sessions in DB
-            async with AsyncSessionLocal() as db:
-                session_repo = self._get_session_repo(db)
-                # This is expensive but safe for now: get all sessions and check paths
-                # Or we can just rely on the fact that next login will fix it.
-                # Let's try to extract phone number from session name if standard format
-                # Format: {phone}_{hash} or {phone}
-                parts = session_name.split('_')
-                if parts[0].isdigit():
-                     # Likely phone number without +
-                     # We can try to query DB for this phone
-                     # Since we strip +, we might need to query loosely or store map.
-                     pass
+            # 3. Fail active jobs associated with this session
+            try:
+                # Extract phone number guess
+                phone_part = session_name.split('_')[0]
+                if not phone_part.startswith('+') and phone_part.isdigit():
+                    phone_part = f"+{phone_part}"
+                
+                from app.database.connection import AsyncSessionLocal
+                from app.database.repositories.user_repository import UserRepository
+                from app.database.repositories.job_repository import JobRepository
+                
+                async with AsyncSessionLocal() as db:
+                    user_repo = UserRepository(db)
+                    job_repo = JobRepository(db)
+                    
+                    # Try to find user by likely phone number
+                    user = await user_repo.get_by_phone(phone_part)
+                    if user:
+                        active_jobs = await job_repo.get_active_jobs_by_user(user.id)
+                        for job in active_jobs:
+                            logger.warning(f"Failing job {job.job_id} due to revoked session {session_name}")
+                            await job_repo.update_status(
+                                job, 
+                                "failed", 
+                                error_message="Sessão revogada/inválida. Faça login novamente.",
+                                status_message=None
+                            )
+                        if active_jobs:
+                            await db.commit()
+                            logger.info(f"Failed {len(active_jobs)} jobs for revoked session {session_name}")
+            except Exception as e:
+                logger.error(f"Error failing jobs for revoked session {session_name}: {e}")
                 
         except Exception as e:
             logger.error(f"Error handling revoked session {session_name}: {e}")
