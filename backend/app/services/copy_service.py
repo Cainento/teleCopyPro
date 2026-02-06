@@ -110,6 +110,159 @@ class CopyService:
                 logger.error(f"Could not resolve entity {entity_id}")
                 raise CopyServiceError(f"Não foi possível encontrar o canal/grupo {entity_id}. Verifique se:\n1. Você é membro do canal/grupo\n2. O ID está correto\n3. Se for público, tente usar o @username")
 
+    async def _copy_message_protected(
+        self,
+        client,
+        target_entity,
+        message,
+    ) -> bool:
+        """
+        Copy a message from a protected channel by downloading and re-uploading.
+        
+        This bypasses ChatForwardsRestrictedError by downloading media/content
+        directly and sending it as a new message instead of forwarding.
+        
+        Args:
+            client: TelegramClient instance
+            target_entity: Target channel/group entity
+            message: The message to copy
+            
+        Returns:
+            bool: True if successful, False if failed
+        """
+        try:
+            # Check if message has media
+            if message.media:
+                # Download media to memory (bytes)
+                media_bytes = await message.download_media(file=bytes)
+                
+                if media_bytes:
+                    # Prepare caption and formatting
+                    caption = message.message or ""
+                    entities = message.entities
+                    
+                    # Determine media type and get proper filename/extension
+                    is_photo = message.photo is not None
+                    is_voice = hasattr(message, 'voice') and message.voice is not None
+                    is_video_note = hasattr(message, 'video_note') and message.video_note is not None
+                    is_sticker = hasattr(message, 'sticker') and message.sticker is not None
+                    is_video = hasattr(message, 'video') and message.video is not None
+                    is_audio = hasattr(message, 'audio') and message.audio is not None
+                    is_gif = hasattr(message, 'gif') and message.gif is not None
+                    is_document = hasattr(message, 'document') and message.document is not None and not is_voice and not is_video_note and not is_sticker and not is_audio and not is_video and not is_gif
+                    
+                    # Get original filename from document attributes if available
+                    original_filename = None
+                    if hasattr(message.media, 'document') and message.media.document:
+                        for attr in message.media.document.attributes:
+                            if hasattr(attr, 'file_name'):
+                                original_filename = attr.file_name
+                                break
+                    
+                    # Determine file extension based on media type
+                    import io
+                    file_obj = io.BytesIO(media_bytes)
+                    
+                    if original_filename:
+                        file_obj.name = original_filename
+                    elif is_photo:
+                        file_obj.name = "photo.jpg"
+                    elif is_video:
+                        file_obj.name = "video.mp4"
+                    elif is_voice:
+                        file_obj.name = "voice.ogg"
+                    elif is_video_note:
+                        file_obj.name = "video_note.mp4"
+                    elif is_audio:
+                        file_obj.name = "audio.mp3"
+                    elif is_gif:
+                        file_obj.name = "animation.gif"
+                    elif is_sticker:
+                        # Check if animated sticker
+                        if hasattr(message.media, 'document') and message.media.document:
+                            mime = message.media.document.mime_type or ""
+                            if "tgs" in mime:
+                                file_obj.name = "sticker.tgs"
+                            elif "webm" in mime:
+                                file_obj.name = "sticker.webm"
+                            else:
+                                file_obj.name = "sticker.webp"
+                        else:
+                            file_obj.name = "sticker.webp"
+                    else:
+                        file_obj.name = "file.bin"
+                    
+                    file_obj.seek(0)
+                    
+                    # Send the file with appropriate options
+                    if is_sticker:
+                        # Stickers don't support captions
+                        await client.send_file(
+                            target_entity,
+                            file=file_obj,
+                        )
+                    elif is_voice:
+                        await client.send_file(
+                            target_entity,
+                            file=file_obj,
+                            caption=caption,
+                            formatting_entities=entities,
+                            voice_note=True,
+                        )
+                    elif is_video_note:
+                        await client.send_file(
+                            target_entity,
+                            file=file_obj,
+                            video_note=True,
+                        )
+                    elif is_document:
+                        # Force document to preserve original format
+                        await client.send_file(
+                            target_entity,
+                            file=file_obj,
+                            caption=caption,
+                            formatting_entities=entities,
+                            force_document=True,
+                        )
+                    else:
+                        # Photos, videos, animations, audio - let Telethon detect from extension
+                        await client.send_file(
+                            target_entity,
+                            file=file_obj,
+                            caption=caption,
+                            formatting_entities=entities,
+                        )
+                    
+                    logger.debug(f"Protected copy: Successfully copied media message {message.id}")
+                    return True
+                else:
+                    logger.warning(f"Protected copy: Failed to download media for message {message.id}")
+                    return False
+            else:
+                # Text-only message
+                text = message.message
+                entities = message.entities
+                
+                if text:
+                    await client.send_message(
+                        target_entity,
+                        message=text,
+                        formatting_entities=entities,
+                    )
+                    logger.debug(f"Protected copy: Successfully copied text message {message.id}")
+                    return True
+                else:
+                    # Empty message (rare case)
+                    logger.debug(f"Protected copy: Skipping empty message {message.id}")
+                    return True  # Consider empty messages as "copied"
+                    
+        except FloodWaitError:
+            # Re-raise FloodWait to be handled by caller
+            raise
+        except Exception as e:
+            logger.error(f"Protected copy failed for message {message.id}: {e}", exc_info=True)
+            return False
+
     async def _copy_message_with_retry(
         self,
         client,
@@ -150,7 +303,32 @@ class CopyService:
                 # Don't increment retry count for FloodWait, we must wait it out
                 continue
 
-            except (ChannelPrivateError, ChatForwardsRestrictedError, ChatWriteForbiddenError, PeerIdInvalidError) as e:
+            except ChatForwardsRestrictedError:
+                # Protected channel - fallback to download/re-upload method
+                logger.debug(f"Protected channel: using download/upload for message {message.id}")
+                try:
+                    success = await self._copy_message_protected(client, target_entity, message)
+                    if success:
+                        # Clear status message if it was set
+                        if db_job and db_job.status_message:
+                            await self.job_repo.update_status(db_job, db_job.status, status_message="")
+                            await self.db.commit()
+                        return True
+                    else:
+                        return False
+                except FloodWaitError as flood_e:
+                    # Handle FloodWait from protected copy method
+                    wait_time = flood_e.seconds
+                    logger.warning(f"FloodWaitError in protected copy: Waiting {wait_time} seconds...")
+                    if db_job:
+                        msg = f"Aguardando {wait_time}s (Limitação do Telegram)..."
+                        await self.job_repo.update_status(db_job, db_job.status, status_message=msg)
+                        await self.db.commit()
+                    await asyncio.sleep(wait_time + 1)
+                    # Retry the protected copy once after flood wait
+                    return await self._copy_message_protected(client, target_entity, message)
+
+            except (ChannelPrivateError, ChatWriteForbiddenError, PeerIdInvalidError) as e:
                 # Fatal errors - do not retry, stop the job
                 logger.error(f"Permission/Peer error: {e}")
                 raise CopyServiceError(f"Erro: O canal/chat de destino é inválido, não existe ou você não tem permissão de acesso.") from e
@@ -564,6 +742,108 @@ class CopyService:
             target_entity = await self._get_entity_with_retry(client, target_id)
             logger.info(f"Successfully got both entities")
 
+            # Helper function for protected channel copying in real-time mode
+            async def _copy_message_protected_inline(message, fresh_job, handler_repo, handler_db):
+                """Copy a message from protected channel using download/upload approach."""
+                import io
+                try:
+                    if message.media:
+                        # Download media to memory
+                        media_bytes = await message.download_media(file=bytes)
+                        
+                        if media_bytes:
+                            caption = message.message or ""
+                            entities = message.entities
+                            
+                            # Determine media type
+                            is_photo = message.photo is not None
+                            is_voice = hasattr(message, 'voice') and message.voice is not None
+                            is_video_note = hasattr(message, 'video_note') and message.video_note is not None
+                            is_sticker = hasattr(message, 'sticker') and message.sticker is not None
+                            is_video = hasattr(message, 'video') and message.video is not None
+                            is_audio = hasattr(message, 'audio') and message.audio is not None
+                            is_gif = hasattr(message, 'gif') and message.gif is not None
+                            is_document = hasattr(message, 'document') and message.document is not None and not is_voice and not is_video_note and not is_sticker and not is_audio and not is_video and not is_gif
+                            
+                            # Get original filename from document attributes
+                            original_filename = None
+                            if hasattr(message.media, 'document') and message.media.document:
+                                for attr in message.media.document.attributes:
+                                    if hasattr(attr, 'file_name'):
+                                        original_filename = attr.file_name
+                                        break
+                            
+                            # Create BytesIO with proper filename
+                            file_obj = io.BytesIO(media_bytes)
+                            if original_filename:
+                                file_obj.name = original_filename
+                            elif is_photo:
+                                file_obj.name = "photo.jpg"
+                            elif is_video:
+                                file_obj.name = "video.mp4"
+                            elif is_voice:
+                                file_obj.name = "voice.ogg"
+                            elif is_video_note:
+                                file_obj.name = "video_note.mp4"
+                            elif is_audio:
+                                file_obj.name = "audio.mp3"
+                            elif is_gif:
+                                file_obj.name = "animation.gif"
+                            elif is_sticker:
+                                if hasattr(message.media, 'document') and message.media.document:
+                                    mime = message.media.document.mime_type or ""
+                                    if "tgs" in mime:
+                                        file_obj.name = "sticker.tgs"
+                                    elif "webm" in mime:
+                                        file_obj.name = "sticker.webm"
+                                    else:
+                                        file_obj.name = "sticker.webp"
+                                else:
+                                    file_obj.name = "sticker.webp"
+                            else:
+                                file_obj.name = "file.bin"
+                            file_obj.seek(0)
+                            
+                            # Send based on type
+                            if is_sticker:
+                                await client.send_file(target_entity, file=file_obj)
+                            elif is_voice:
+                                await client.send_file(target_entity, file=file_obj, caption=caption, formatting_entities=entities, voice_note=True)
+                            elif is_video_note:
+                                await client.send_file(target_entity, file=file_obj, video_note=True)
+                            elif is_document:
+                                await client.send_file(target_entity, file=file_obj, caption=caption, formatting_entities=entities, force_document=True)
+                            else:
+                                await client.send_file(target_entity, file=file_obj, caption=caption, formatting_entities=entities)
+                            
+                            # Success - update progress
+                            await handler_repo.update_progress(fresh_job, fresh_job.copied_messages + 1, None, fresh_job.failed_messages)
+                            await handler_db.commit()
+                            logger.info(f"[Handler {job_id}] Protected copy: copied media message {message.id}")
+                        else:
+                            # Failed to download
+                            await handler_repo.update_progress(fresh_job, fresh_job.copied_messages, None, fresh_job.failed_messages + 1)
+                            await handler_db.commit()
+                            logger.warning(f"[Handler {job_id}] Protected copy: failed to download media for {message.id}")
+                    else:
+                        # Text-only message
+                        text = message.message
+                        if text:
+                            await client.send_message(target_entity, message=text, formatting_entities=message.entities)
+                            await handler_repo.update_progress(fresh_job, fresh_job.copied_messages + 1, None, fresh_job.failed_messages)
+                            await handler_db.commit()
+                            logger.info(f"[Handler {job_id}] Protected copy: copied text message {message.id}")
+                        else:
+                            # Empty message
+                            logger.debug(f"[Handler {job_id}] Protected copy: skipping empty message {message.id}")
+                except Exception as e:
+                    logger.error(f"[Handler {job_id}] Protected copy failed for message {message.id}: {e}")
+                    try:
+                        await handler_repo.update_progress(fresh_job, fresh_job.copied_messages, None, fresh_job.failed_messages + 1)
+                        await handler_db.commit()
+                    except:
+                        pass
+
             # Create event handler
             async def message_handler(event):
                 """Handle new messages from source channel."""
@@ -631,6 +911,10 @@ class CopyService:
                                             fresh_job.failed_messages
                                         )
                                         await handler_db.commit()
+                                    except ChatForwardsRestrictedError:
+                                        # Protected channel retry - use download/upload
+                                        logger.debug(f"[Handler {job_id}] Protected channel retry: download/upload for message {event.message.id}")
+                                        await _copy_message_protected_inline(event.message, fresh_job, handler_repo, handler_db)
                                     except Exception as retry_e:
                                         logger.error(f"[Handler {job_id}] Failed retry: {retry_e}")
                                         # Count as failure
@@ -641,6 +925,11 @@ class CopyService:
                                             fresh_job.failed_messages + 1
                                         )
                                         await handler_db.commit()
+
+                                except ChatForwardsRestrictedError:
+                                    # Protected channel - use download/upload method
+                                    logger.debug(f"[Handler {job_id}] Protected channel: using download/upload for message {event.message.id}")
+                                    await _copy_message_protected_inline(event.message, fresh_job, handler_repo, handler_db)
 
                             elif fresh_job.status in ["stopped", "failed", "paused"]:
                                  # Job is in a terminal state or paused, remove handler to stop processing
