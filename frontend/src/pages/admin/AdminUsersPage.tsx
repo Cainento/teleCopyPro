@@ -162,7 +162,7 @@ export function AdminUsersPage() {
                     {/* Pagination */}
                     {data && (
                         <div className="px-6 py-3 flex items-center justify-between border-t border-gray-200 dark:border-gray-700">
-                            <div className="flex-1 flex justify-between sm:hidden">
+                            <div className="flex-1 flex justify-between">
                                 <button
                                     onClick={() => setPage(Math.max(1, page - 1))}
                                     disabled={page === 1}
