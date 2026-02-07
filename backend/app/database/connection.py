@@ -89,11 +89,28 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             yield session
             await session.commit()
         except Exception as e:
-            await session.rollback()
-            logger.error(f"Database session error: {e}")
+            # Check if the connection is still valid before attempting rollback
+            # InterfaceError indicates the connection is already closed
+            try:
+                await session.rollback()
+            except Exception as rollback_error:
+                # Connection might already be closed, log but don't re-raise
+                logger.warning(f"Rollback failed (connection may be closed): {rollback_error}")
+            
+            # Only log and re-raise if it's not a connection-closed error during cleanup
+            # InterfaceError with "connection is closed" is expected when connection times out
+            error_str = str(e).lower()
+            if "connection is closed" in error_str or "interfaceerror" in error_str:
+                logger.warning(f"Database connection was closed unexpectedly: {e}")
+            else:
+                logger.error(f"Database session error: {e}")
             raise
         finally:
-            await session.close()
+            try:
+                await session.close()
+            except Exception as close_error:
+                # Connection might already be closed, safe to ignore
+                logger.debug(f"Session close skipped (already closed): {close_error}")
 
 
 async def init_db() -> None:
