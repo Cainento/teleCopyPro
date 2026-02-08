@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Sparkles, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { AuthWizard } from '@/features/auth/components/AuthWizard';
 import { ROUTES } from '@/lib/constants';
@@ -72,13 +72,11 @@ export function LoginPage() {
 
           {/* Logo */}
           <div className="flex items-center gap-3 mb-8">
-            <div className="relative flex items-center justify-center w-12 h-12">
-              <div className="absolute inset-0 bg-white/20 rounded-xl rotate-6" />
-              <div className="absolute inset-0 bg-white/10 rounded-xl -rotate-6" />
-              <div className="relative bg-white/30 backdrop-blur-sm rounded-xl w-full h-full flex items-center justify-center">
-                <Sparkles className="w-6 h-6 text-white" />
-              </div>
-            </div>
+            <img
+              src="/ClonaGram logo.png"
+              alt="ClonaGram"
+              className="w-12 h-12 object-contain"
+            />
             <div className="flex flex-col leading-none">
               <span className="text-2xl font-bold text-white">
                 Clona<span className="text-white/80">Gram</span>
@@ -135,13 +133,11 @@ export function LoginPage() {
         {/* Mobile Logo */}
         <div className="lg:hidden text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="relative flex items-center justify-center w-10 h-10">
-              <div className="absolute inset-0 bg-gradient-to-br from-primary to-secondary rounded-xl rotate-6 opacity-80" />
-              <div className="absolute inset-0 bg-gradient-to-br from-primary to-secondary rounded-xl -rotate-6 opacity-60" />
-              <div className="relative bg-gradient-to-br from-primary to-secondary rounded-xl w-full h-full flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-white" />
-              </div>
-            </div>
+            <img
+              src="/ClonaGram logo.png"
+              alt="ClonaGram"
+              className="w-10 h-10 object-contain"
+            />
             <div className="flex flex-col leading-none">
               <span className="text-xl font-bold">
                 <span className="text-gradient">Clona</span>

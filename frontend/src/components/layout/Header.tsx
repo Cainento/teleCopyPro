@@ -1,6 +1,6 @@
 import { useAuthStore } from '@/store/auth.store';
 import { useThemeStore } from '@/store/theme.store';
-import { Moon, Sun, Sparkles, LogOut, User } from 'lucide-react';
+import { Moon, Sun, LogOut, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/cn';
@@ -10,13 +10,11 @@ import { ROUTES } from '@/lib/constants';
 function Logo({ className }: { className?: string }) {
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <div className="relative flex items-center justify-center w-8 h-8">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary to-secondary rounded-lg rotate-6 opacity-80" />
-        <div className="absolute inset-0 bg-gradient-to-br from-primary to-secondary rounded-lg -rotate-6 opacity-60" />
-        <div className="relative bg-gradient-to-br from-primary to-secondary rounded-lg w-full h-full flex items-center justify-center">
-          <Sparkles className="w-4 h-4 text-white" />
-        </div>
-      </div>
+      <img
+        src="/ClonaGram logo.png"
+        alt="ClonaGram"
+        className="w-8 h-8 object-contain"
+      />
       <div className="flex flex-col leading-none">
         <span className="text-base font-bold tracking-tight">
           <span className="text-gradient">Clona</span>
