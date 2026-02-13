@@ -1,14 +1,18 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { ArrowRight, Play, Lock } from 'lucide-react';
+import { ArrowRight, Play, Lock, Crown, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { copyJobSchema, type CopyJobFormData } from '../schemas/copy.schema';
 import { useCopy } from '../hooks/useCopy';
 import { CopyModeSelector } from './CopyModeSelector';
 import { ChannelInput } from './ChannelInput';
 import { CopyOptions } from './CopyOptions';
+import { ROUTES } from '@/lib/constants';
 
 export function CopyForm() {
   const { handleSubmit: onSubmit, isLoading, canUseRealTime, canUseHistorical, usageStats } = useCopy();
+  const navigate = useNavigate();
+  const isFreePlan = usageStats?.plan?.toLowerCase() === 'free';
 
   const {
     register,
@@ -66,6 +70,15 @@ export function CopyForm() {
                     <p className="text-sm text-muted-foreground">
                       {usageStats.realtime_job_blocked_reason}
                     </p>
+                    {isFreePlan && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`${ROUTES.ACCOUNT}#upgrade`)}
+                        className="text-sm text-primary font-medium hover:underline mt-2 inline-flex items-center gap-1"
+                      >
+                        Faça upgrade <ArrowRight className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -83,6 +96,13 @@ export function CopyForm() {
                     <p className="text-sm text-muted-foreground">
                       {usageStats.historical_job_blocked_reason}
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`${ROUTES.ACCOUNT}#upgrade`)}
+                      className="text-sm text-primary font-medium hover:underline mt-2 inline-flex items-center gap-1"
+                    >
+                      Faça upgrade <ArrowRight className="h-3 w-3" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -100,10 +120,53 @@ export function CopyForm() {
                     <p className="text-sm text-muted-foreground">
                       {usageStats.message_limit_blocked_reason}
                     </p>
+                    {isFreePlan && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`${ROUTES.ACCOUNT}#upgrade`)}
+                        className="text-sm text-primary font-medium hover:underline mt-2 inline-flex items-center gap-1"
+                      >
+                        Faça upgrade <ArrowRight className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Upgrade Banner - Only for FREE users */}
+        {isFreePlan && (
+          <div className="relative overflow-hidden rounded-xl border border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-secondary/10 p-5">
+            {/* Decorative background elements */}
+            <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-primary/10 blur-2xl" />
+            <div className="absolute -left-4 -bottom-4 h-20 w-20 rounded-full bg-secondary/10 blur-2xl" />
+
+            <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-4">
+              <div className="flex items-center gap-3 flex-1">
+                <div className="flex-shrink-0 w-11 h-11 rounded-xl bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-lg shadow-primary/25">
+                  <Crown className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-sm flex items-center gap-2">
+                    Desbloqueie todo o potencial
+                    <Sparkles className="h-4 w-4 text-primary" />
+                  </h4>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Cópia em tempo real, mais jobs e mensagens — faça upgrade agora!
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate(`${ROUTES.ACCOUNT}#upgrade`)}
+                className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl font-medium text-sm bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/30"
+              >
+                <Crown className="h-4 w-4" />
+                Fazer Upgrade
+              </button>
+            </div>
           </div>
         )}
 

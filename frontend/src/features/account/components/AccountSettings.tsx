@@ -67,6 +67,20 @@ export function AccountSettings() {
     verifyPayment();
   }, [location, navigate, refetch]);
 
+  // Scroll to upgrade section if navigated with #upgrade hash
+  useEffect(() => {
+    if (location.hash === '#upgrade' && !isLoading) {
+      // Small delay to ensure the DOM has rendered
+      const timer = setTimeout(() => {
+        const el = document.getElementById('upgrade-section');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [location.hash, isLoading]);
+
   const handleLogout = async () => {
     setIsLoggingOut(true);
     try {
@@ -188,6 +202,18 @@ export function AccountSettings() {
         />
       </motion.div>
 
+      {/* Upgrade Plans - Shown right after PlanCard for FREE users for better visibility */}
+      {accountData.plan === 'FREE' && (
+        <motion.div
+          id="upgrade-section"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+        >
+          <UpgradePlan currentPlan={accountData.plan} />
+        </motion.div>
+      )}
+
       {/* Subscription Management */}
       {(accountData.plan === 'PREMIUM' || accountData.plan === 'ENTERPRISE') && (
         <motion.div
@@ -218,10 +244,10 @@ export function AccountSettings() {
         />
       </motion.div>
 
-
-      {/* Upgrade Plans - Only show for FREE and PREMIUM users */}
-      {accountData.plan !== 'ENTERPRISE' && (
+      {/* Upgrade Plans - For PREMIUM users, show at the bottom (Enterprise upgrade option) */}
+      {accountData.plan === 'PREMIUM' && (
         <motion.div
+          id="upgrade-section"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
